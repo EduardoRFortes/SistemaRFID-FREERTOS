@@ -2,6 +2,14 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "R200.h"
+#include <WiFiClientSecure.h>
+#include <time.h>
+
+// ======= DEFINIÇÕES PARA TIME.H ========
+
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = -3 * 3600;
+const int daylightOffset_sec = 0;
 
 // ======= HEADERS DO FREERTOS PARA ARDUINO IDE ========
 #include <Arduino.h>
@@ -13,8 +21,8 @@
 // ======= CONFIGURAÇÕES DE REDE E MQTT ========
 const char* SSID = "nersec";
 const char* SENHA = "gremio123";
-const char* BROKER_MQTT = "172.22.48.50"; // Seu broker MQTT
-const int PORTA_MQTT = 1883;
+const char* BROKER_MQTT = "mosquittoserver.lan"; // Seu broker MQTT
+const int PORTA_MQTT = 8883;
 
 // ===================================================================================
 // ======= IMPORTANTE: CLIENT_ID DEVE SER ÚNICO PARA CADA ESP32/MÓDULO! =======
@@ -37,9 +45,68 @@ const int MEU_SLOT_INDEX = 0; // MÓDULO 1: 0; MÓDULO 2: 1; MÓDULO 3: 2
 // ===================================================================================
 
 // ======= OBJETOS GLOBAIS ========
-WiFiClient espClient;
+WiFiClientSecure espClient;
 PubSubClient mqttClient(espClient);
 R200 rfid;
+
+// ======= CERTIFICADOS DIGITAIS ========
+
+#define client_cert "-----BEGIN CERTIFICATE-----\n"\
+"MIICSTCCAe+gAwIBAgIRAOjlIq1MGLdag3pedDIBlh8wCgYIKoZIzj0EAwIwNDEL\n"\
+"MAkGA1UEBhMCQlIxFDASBgNVBAoMC05FUlNFQy1VRlNNMQ8wDQYDVQQDDAZjYS1s\n"\
+"YW4wHhcNMjUwNzE2MTcyNzMwWhcNMjgwNzE1MTcyNzMwWjBHMQswCQYDVQQGEwJC\n"\
+"UjELMAkGA1UECAwCUlMxFDASBgNVBAoMC05FUlNFQy1VRlNNMRUwEwYDVQQDDAx0\n"\
+"YXJub2RlMS5sYW4wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQ9/PpLDbxYasgq\n"\
+"NfWsTnmoopCKqT34x8cD2vxyjBqf0K95vA6VGgh+T0Uj7RJE1PWYwjYxTEucMGYi\n"\
+"R3YRJBZco4HOMIHLMAwGA1UdEwEB/wQCMAAwPAYDVR0fBDUwMzAxoC+gLYYrbW9z\n"\
+"cXVpdHRvc2VydmVyLmxhbi9pbnRlcm1lZGlhdGUtY2EuY3JsLnBlbTARBglghkgB\n"\
+"hvhCAQEEBAMCBaAwHQYDVR0lBBYwFAYIKwYBBQUHAwIGCCsGAQUFBwMEMAsGA1Ud\n"\
+"DwQEAwIDqDAdBgNVHQ4EFgQUWeVBqGYkPEUAvmm/KL1M3dPZ0LcwHwYDVR0jBBgw\n"\
+"FoAUTbUuu9YCfRfzW8IkFEccApguiRgwCgYIKoZIzj0EAwIDSAAwRQIgLE0f+dBM\n"\
+"dVLzQ9ckIj2VrNNQzXdrfFWuJ95Dda+XrLcCIQCk0SZx3rUl1o6JI66/83M8HgCq\n"\
+"dlnqlOwHAjfdmo7RXg==\n"\
+"-----END CERTIFICATE-----"
+
+#define client_key "-----BEGIN EC PARAMETERS-----\n"\
+"BggqhkjOPQMBBw==\n"\
+"-----END EC PARAMETERS-----\n"\
+"-----BEGIN EC PRIVATE KEY-----\n"\
+"MHcCAQEEIBeQUBufHAO+a/fWHdaT5gSIniF2AkwRyk56MQBrAaM0oAoGCCqGSM49\n"\
+"AwEHoUQDQgAEPfz6Sw28WGrIKjX1rE55qKKQiqk9+MfHA9r8cowan9CvebwOlRoI\n"\
+"fk9FI+0SRNT1mMI2MUxLnDBmIkd2ESQWXA==\n"\
+"-----END EC PRIVATE KEY-----"
+
+#define mqtt_ca_cert "-----BEGIN CERTIFICATE-----\n" \
+"MIIBrjCCAVWgAwIBAgIRANyNugeNEoawITo4oewP6n8wCgYIKoZIzj0EAwIwNzEL\n" \
+"MAkGA1UEBhMCQlIxFDASBgNVBAoMC05FUlNFQy1VRlNNMRIwEAYDVQQDDAlyb290\n" \
+"LWxhbiAwHhcNMjUwNzE2MTcyNzMwWhcNMzUwNzE0MTcyNzMwWjA3MQswCQYDVQQG\n" \
+"EwJCUjEUMBIGA1UECgwLTkVSU0VDLVVGU00xEjAQBgNVBAMMCXJvb3QtbGFuIDBZ\n" \
+"MBMGByqGSM49AgEGCCqGSM49AwEHA0IABOsa+do/kpI+BA0uJacDJjx7Lqaxwct4\n" \
+"Pw2MW7odHQ1grXbFRNZ3gw5QBek9sbdT/yJk+BF79UxoAfx82TP4D3OjQjBAMA8G\n" \
+"A1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMB0GA1UdDgQWBBSUnWdrM2mq\n" \
+"e4olqtZL6mAtyaPjTjAKBggqhkjOPQQDAgNHADBEAiAqG8hvtpuf/NtfdNCojG+J\n" \
+"WusMnqflX/iRe1MpxsCflQIgAu3gqFijzuqdo6PfwgEMq+wAF35I0D2QCq9EoZcW\n" \
+"TNU=\n" \
+"-----END CERTIFICATE-----\n" \
+"-----BEGIN CERTIFICATE-----\n" \
+"MIIC1zCCAn2gAwIBAgIRANyNugeNEoawITo4oewP6oAwCgYIKoZIzj0EAwIwNzEL\n" \
+"MAkGA1UEBhMCQlIxFDASBgNVBAoMC05FUlNFQy1VRlNNMRIwEAYDVQQDDAlyb290\n" \
+"LWxhbiAwHhcNMjUwNzE2MTcyNzMwWhcNMzUwNzE0MTcyNzMwWjA0MQswCQYDVQQG\n" \
+"EwJCUjEUMBIGA1UECgwLTkVSU0VDLVVGU00xDzANBgNVBAMMBmNhLWxhbjBZMBMG\n" \
+"ByqGSM49AgEGCCqGSM49AwEHA0IABLLAq9P0u2QI86kZxFs756lI9XsbeGsZRyEf\n" \
+"Xi4P8fjf22ql3o5KwsdXKs1ivGOUTpUyhoerY5vCS6zptzuSxhyjggFrMIIBZzBk\n" \
+"BggrBgEFBQcBAQRYMFYwKgYIKwYBBQUHMAKGHmh0dHA6Ly9yb290LWNhLmxhbi9y\n" \
+"b290LWNhLmNydDAoBggrBgEFBQcwAYYcaHR0cDovL29jc3Aucm9vdC1jYS5sYW46\n" \
+"OTg4MDAdBgNVHQ4EFgQUTbUuu9YCfRfzW8IkFEccApguiRgwEgYDVR0TAQH/BAgw\n" \
+"BgEB/wIBADAvBgNVHR8EKDAmMCSgIqAghh5odHRwOi8vcm9vdC1jYS5sYW4vcm9v\n" \
+"dC1jYS5jcmwwHQYDVR0lBBYwFAYIKwYBBQUHAwIGCCsGAQUFBwMBMA4GA1UdDwEB\n" \
+"/wQEAwIBBjBLBgNVHR4ERDBCoA4wBYIDbGFuMAWCA2xhbqEwMAqHCAAAAAAAAAAA\n" \
+"MCKHIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMB8GA1UdIwQYMBaA\n" \
+"FJSdZ2szaap7iiWq1kvqYC3Jo+NOMAoGCCqGSM49BAMCA0gAMEUCIHMVTV9NWJtw\n" \
+"wAO/5eTVL19PBnfToZQn8fIiZPPpE0VbAiEA8mhtRSAaKhZtAP29XSZZ9Ic2jJWx\n" \
+"3Xw+Qezhi/j/SLU=\n" \
+"-----END CERTIFICATE-----"
+
 
 // ======= VARIÁVEIS DE CONTROLE DE RTOS (GLOBAL) ========
 SemaphoreHandle_t wifiConectadoSemaphore;
@@ -79,6 +146,14 @@ void TaskConectarWiFi(void *pvParameters) {
     Serial.print(".");
   }
   Serial.println("\nTask ConectarWiFi: Wi-Fi conectado! IP: " + WiFi.localIP().toString());
+  Serial.println("Sincronizando hora com NTP....");
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Falha ao obter o tempo via NTP. Certificados podem falhar!");
+  } else {
+    Serial.println(&timeinfo, "Hora atual: %A, %B %d %Y %H:%M:%S");
+  }
   xSemaphoreGive(wifiConectadoSemaphore); // Sinaliza Wi-Fi conectado
   Serial.println("Task ConectarWiFi: Concluída e se auto-deletando.");
   vTaskDelete(NULL);
@@ -88,21 +163,40 @@ void TaskConectarWiFi(void *pvParameters) {
 void TaskConectarMQTT(void *pvParameters) {
   Serial.println("Task ConectarMQTT: Aguardando conexão Wi-Fi...");
   xSemaphoreTake(wifiConectadoSemaphore, portMAX_DELAY); // Espera Wi-Fi conectado
-  Serial.println("Task ConectarMQTT: Wi-Fi conectado, iniciando conexão MQTT...");
+  Serial.println("Task ConectarMQTT: Wi-Fi conectado, iniciando loop de conexão MQTT...");
+
+  espClient.setCACert(mqtt_ca_cert);
+  espClient.setCertificate(client_cert);
+  espClient.setPrivateKey(client_key);
   mqttClient.setServer(BROKER_MQTT, PORTA_MQTT);
-  while (!mqttClient.connected()) {
-    Serial.print(".");
-    if (mqttClient.connect(CLIENT_ID)) {
-      Serial.println("\nTask ConectarMQTT: Conectado ao MQTT!");
+
+  // A TAREFA DEVE RODAR EM UM LOOP INFINITO PARA GERENCIAR A RECONEXÃO
+  while (true) {
+    if (!mqttClient.connected()) {
+      Serial.print("Task ConectarMQTT: Tentando conectar ao broker MQTT...");
+      // A PubSubClient precisa de um CLIENT_ID único por conexão.
+      // É uma boa prática adicionar um timestamp ou um número aleatório
+      // para garantir que seja único, especialmente após reconexões.
+      String currentClientId = String(CLIENT_ID) + "_" + String(esp_random(), HEX);
+      
+      if (mqttClient.connect(currentClientId.c_str())) { // Use currentClientId aqui
+        Serial.println(" [Task ConectarMQTT] Conectado ao MQTT!");
+        // Opcional: Se houver algum tópico para se inscrever no cliente:
+        // mqttClient.subscribe("seu/topico/sub");
+        xSemaphoreGive(mqttConectadoSemaphore); // Sinaliza MQTT conectado
+      } else {
+        Serial.print(" [Task ConectarMQTT] Falha na conexão, rc=");
+        Serial.print(mqttClient.state());
+        Serial.println(". Tentando novamente em 5 segundos...");
+        vTaskDelay(pdMS_TO_TICKS(5000)); // Espera antes de tentar novamente
+      }
     } else {
-      Serial.print(" Falha, rc=");
-      Serial.print(mqttClient.state());
-      vTaskDelay(pdMS_TO_TICKS(1000));
+      // Se conectado, apenas cede tempo ou faz alguma manutenção leve.
+      // O mqttClient.loop() principal é feito na TaskPublicarMQTT
+      vTaskDelay(pdMS_TO_TICKS(100)); // Pequeno delay para ceder CPU
     }
   }
-  xSemaphoreGive(mqttConectadoSemaphore); // Sinaliza MQTT conectado
-  Serial.println("Task ConectarMQTT: Concluída e se auto-deletando.");
-  vTaskDelete(NULL);
+  // vTaskDelete(NULL); // NUNCA deve ser chamado aqui em uma tarefa de loop
 }
 
 // ======= TAREFA DE LEITURA RFID ========
@@ -167,35 +261,52 @@ void TaskLeituraRFID(void *pvParameters) {
 
 // ======= TAREFA EM LOOP: PUBLICAR DADOS MQTT (Recebe da fila) ========
 void TaskPublicarMQTT(void *pvParameters) {
-    // Espera o sinal de que o MQTT está conectado antes de começar a publicar
     Serial.println("Task PublicarMQTT: Aguardando conexão MQTT...");
-    xSemaphoreTake(mqttConectadoSemaphore, portMAX_DELAY); // Bloqueia indefinidamente até MQTT estar pronto
+    // A primeira espera é para garantir que a conexão inicial esteja pronta
+    xSemaphoreTake(mqttConectadoSemaphore, portMAX_DELAY); 
 
     Serial.println("Task PublicarMQTT: MQTT conectado. Iniciando publicações.");
 
-    String epc_recebido; // Variável para receber a String da fila
+    String epc_recebido; 
 
-    while (1) {
-        // 1. Manter a conexão MQTT viva
-        if (!mqttClient.connected()) {
-            Serial.println("Task PublicarMQTT: Conexão MQTT perdida. Tentando reconectar...");
-            mqttClient.connect(CLIENT_ID);
-            if (!mqttClient.connected()) {
-                vTaskDelay(pdMS_TO_TICKS(5000)); // Espera e tenta novamente
-                continue;
-            } else {
-                Serial.println("Task PublicarMQTT: Reconectado ao MQTT.");
-            }
+    while (true) { // Loop infinito
+        // 1. Manter a conexão MQTT viva e processar eventos
+        // Se a conexão cair, a TaskConectarMQTT deve reestabelecê-la
+        if (mqttClient.connected()) {
+            mqttClient.loop(); 
+        } else {
+            Serial.println("Task PublicarMQTT: MQTT desconectado. Aguardando reconexão...");
+            // Espera até que a TaskConectarMQTT sinalize que o MQTT está novamente conectado
+            // Isso pode bloquear por tempo indeterminado se TaskConectarMQTT falhar indefinidamente
+            xSemaphoreTake(mqttConectadoSemaphore, portMAX_DELAY);
+            Serial.println("Task PublicarMQTT: MQTT Reconectado (sinalizado).");
+            continue; // Volta para o início do loop para garantir que loop() seja chamado antes de tentar enviar
         }
-        mqttClient.loop(); // Processa mensagens MQTT e mantém a conexão
 
         // 2. Receber dados da fila (do RFID)
         // Se a fila estiver vazia, espera por 100ms e cede tempo.
         if (xQueueReceive(rfidDataQueue, (void*)&epc_recebido, pdMS_TO_TICKS(100))) {
             Serial.print("Task PublicarMQTT: Recebido da fila para publicar: "); Serial.println(epc_recebido);
             
-            // 3. Chamar a função auxiliar para publicar o EPC recebido
-            publicarMQTT(epc_recebido); 
+            // Verifica a conexão antes de publicar. mqttClient.loop() já deve ter tentado manter.
+            if (mqttClient.connected()) {
+                JsonDocument doc;
+                doc["epc"] = epc_recebido;
+                doc["timestamp"] = String(millis());
+                doc["mqttId"] = CLIENT_ID; // Use o CLIENT_ID definido globalmente
+
+                String jsonString;
+                serializeJson(doc, jsonString);
+
+                if (mqttClient.publish(TOPICO_MQTT, jsonString.c_str())) {
+                    Serial.println("Task PublicarMQTT: Publicado via MQTT: " + jsonString);
+                } else {
+                    Serial.print("Task PublicarMQTT: Falha ao publicar: Cliente conectado, mas publicacao falhou. rc=");
+                    Serial.println(mqttClient.state());
+                }
+            } else {
+                Serial.println("Task PublicarMQTT: Não foi possível publicar: Cliente não conectado (após tentativa de reconexão?).");
+            }
         }
         
         vTaskDelay(pdMS_TO_TICKS(10)); // Ceder tempo
@@ -209,14 +320,13 @@ void setup() {
 
   // Inicialização do módulo RFID (agora no setup, pois rfid é global)
   rfid.begin(&Serial2, 115200, 16, 17);
-  // As linhas comentadas abaixo são OK, mas verifique o funcionamento da sua biblioteca R200
   //rfid.dumpModuleInfo();
   rfid.setTransmissionPower(100);
   //rfid.acquireTransmitPower();
 
   // --- CRIAÇÃO DOS SEMÁFOROS ---
   wifiConectadoSemaphore = xSemaphoreCreateBinary();
-  mqttConectadoSemaphore = xSemaphoreCreateBinary(); // CORREÇÃO AQUI: Cria o segundo semáforo
+  mqttConectadoSemaphore = xSemaphoreCreateBinary();
   
   if (wifiConectadoSemaphore == NULL || mqttConectadoSemaphore == NULL) {
     Serial.println("ERRO: Falha ao criar Semáforos! Sistema parado.");
@@ -233,7 +343,7 @@ void setup() {
 
   // --- CRIAÇÃO DAS TAREFAS ---
   xTaskCreatePinnedToCore(
-    TaskConectarWiFi, // Nome correto da função da tarefa
+    TaskConectarWiFi, 
     "Conectar-WiFi",
     4096,
     NULL,
@@ -243,9 +353,9 @@ void setup() {
   );
 
   xTaskCreatePinnedToCore(
-    TaskConectarMQTT, // Nome correto da função da tarefa
+    TaskConectarMQTT, 
     "Conectar-MQTT",
-    4096,
+    12288,
     NULL,
     4,
     NULL,
@@ -263,7 +373,7 @@ void setup() {
   );
 
   xTaskCreatePinnedToCore(
-    TaskPublicarMQTT, // Nome correto da função da tarefa
+    TaskPublicarMQTT, 
     "Publicar-MQTT",
     8192, // Tarefas de rede e loops podem precisar de mais stack
     NULL,
