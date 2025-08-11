@@ -173,7 +173,7 @@ void TaskLeituraRFID(void *pvParameters) {
             if (rfid.epc.length() > 0) {
                 Serial.print("Task LeituraRFID: TAG LIDA: "); Serial.println(rfid.epc);
                 
-                String epc_puro = rfid.epc.substring(0, 24); // Ler apenas os primeiros 24 caracteres válidos da Tag(EPC);
+                String epc_puro = rfid.epc.substring(0, 22); // Ler apenas os primeiros 24 caracteres válidos da Tag(EPC);
 
                 epc_puro.toCharArray(epc_buffer, sizeof(epc_buffer));
                 
