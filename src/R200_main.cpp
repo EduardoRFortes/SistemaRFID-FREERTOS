@@ -172,7 +172,10 @@ void TaskLeituraRFID(void *pvParameters) {
             rfid.loop();
             if (rfid.epc.length() > 0) {
                 Serial.print("Task LeituraRFID: TAG LIDA: "); Serial.println(rfid.epc);
-                rfid.epc.toCharArray(epc_buffer, sizeof(epc_buffer));
+                
+                String epc_puro = rfid.epc.substring(0, 24); // Ler apenas os primeiros 24 caracteres válidos da Tag(EPC);
+
+                epc_puro.toCharArray(epc_buffer, sizeof(epc_buffer));
                 
                 if (xQueueSend(rfidDataQueue, (void*)&epc_buffer, pdMS_TO_TICKS(10)) != pdPASS) {
                     Serial.println("Task LeituraRFID: Falha ao enviar TAG para a fila MQTT (fila cheia?).");
