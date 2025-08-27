@@ -216,30 +216,56 @@ bool R200::parseReceivedData() {
   }
 }
 
-void R200::setTransmissionPower(uint16_t power) {
-  uint8_t buffer[7];  // Tamanho total do frame
+// Implementação da nova função que ajusta potência e sensibilidade
+void R200::setRFParameters(uint16_t transmitPower, uint8_t demodulatorParameter) {
+    // 1. Configurar a potência de transmissão
+    uint8_t command_power[] = {
+        R200_FrameHeader,
+        FrameType_Command,
+        CMD_SetTransmitPower,
+        0x00, 0x02, // ParamLength: 2 bytes
+        (uint8_t)(transmitPower >> 8),     // Potência MSB
+        (uint8_t)(transmitPower & 0xFF),   // Potência LSB
+        0x00, // Placeholder para o checksum
+        R200_FrameEnd
+    };
+    
+    // O checksum é calculado a partir do 'FrameType' (índice 1) até o último parâmetro
+    uint8_t checksum_power = calculateCheckSum(&command_power[R200_TypePos]);
+    command_power[7] = checksum_power;
+    
+    // Envia o comando completo para o módulo
+    _serial->write(command_power, sizeof(command_power));
+    
+    Serial.print("Potência de transmissão configurada para: ");
+    Serial.print(transmitPower);
+    Serial.println(" (valor bruto)");
 
-  buffer[0] = 0xAA;            // Header
-  buffer[1] = 0x00;            // Frame Type (Command)
-  buffer[2] = 0xB6;            // Command code: Set Power
-  buffer[3] = 0x00;            // Param length MSB (2 bytes)
-  buffer[4] = 0x02;            // Param length LSB
-  buffer[5] = power >> 8;      // Power MSB
-  buffer[6] = power & 0xFF;    // Power LSB
+    // Aguarda a resposta do módulo (opcional, mas recomendado)
+    receiveData();
 
-  // Calcular o checksum: soma dos bytes de [1] até [6], pega apenas o LSB
-  uint8_t checksum = 0;
-  for (int i = 1; i <= 6; ++i) {
-    checksum += buffer[i];
-  }
+    // 2. Configurar os parâmetros do demodulador (sensibilidade)
+    uint8_t command_demod[] = {
+        R200_FrameHeader,
+        FrameType_Command,
+        CMD_SetReceiverDemodulatorParameters,
+        0x00, 0x01, // ParamLength: 1 byte
+        demodulatorParameter,
+        0x00, // Placeholder para o checksum
+        R200_FrameEnd
+    };
 
-  // Enviar comando
-  sendCommand(buffer, 7);
-  Serial.print("Potência de transmissão configurada para: ");
-  Serial.print(power);
-  Serial.println(" (valor bruto)");
+    uint8_t checksum_demod = calculateCheckSum(&command_demod[R200_TypePos]);
+    command_demod[6] = checksum_demod;
 
-  // Esperar resposta do R200 (deveria retornar frame com código 0xB6 e parâmetro 0x00)
+    // Envia o comando completo para o módulo
+    _serial->write(command_demod, sizeof(command_demod));
+
+    Serial.print("Parâmetros do demodulador configurados para: 0x");
+    Serial.println(demodulatorParameter, HEX);
+
+    // Aguarda a resposta do módulo (opcional, mas recomendado)
+    receiveData();
 }
 
 void R200::acquireTransmitPower() {

@@ -144,7 +144,7 @@ void TaskLeituraRFID(void *pvParameters) {
     Serial.println("Task LeituraRFID: Iniciando.");
 
     rfid.begin(&Serial2, 115200, 16, 17);
-    rfid.setTransmissionPower(100);
+    rfid.setRFParameters(2500, 0x04);
 
     unsigned long initial_delay_ms = T_SLOT_COMPLETO_MODULO * MEU_SLOT_INDEX;
     if (initial_delay_ms > 0) {
@@ -254,7 +254,6 @@ void setup() {
 
   // Inicialização do módulo RFID
   rfid.begin(&Serial2, 115200, 16, 17); // Use as portas Tx/Rx corretas para seu RFID
-  rfid.setTransmissionPower(100);
 
   // --- CRIAÇÃO DOS SEMÁFOROS ---
   wifiConectadoSemaphore = xSemaphoreCreateBinary();

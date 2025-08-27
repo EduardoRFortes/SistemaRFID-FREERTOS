@@ -38,7 +38,7 @@ class R200 {
     void setMultiplePollingMode(bool enable=true);
     void dumpModuleInfo();
     bool dataAvailable();
-    void setTransmissionPower(uint16_t power);
+    void setRFParameters(uint16_t transmitPower, uint8_t demodulatorParameter);
     
 
     //bool newCardPresent();
