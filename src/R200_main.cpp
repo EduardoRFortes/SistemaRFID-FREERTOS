@@ -16,7 +16,7 @@
 // ====================================================================
 
 // ====================================================================
-// ======= DECLARAÇÕES DE OBJETOS E VARIÁVEIS GLOBAIS ========
+// ======= DECLARAÇÕES DE OBJETOS E VARIÁVEIS GLOBAIS =================
 
 WiFiClientSecure espClient;
 PubSubClient mqttClient(espClient);
@@ -128,9 +128,9 @@ void TaskConectarMQTT(void *pvParameters) {
         Serial.println("\n[Task ConectarMQTT] Conectado ao MQTT!");
         xSemaphoreGive(mqttConectadoSemaphore); 
       } else {
-        Serial.print(" [Task ConectarMQTT] Falha na conexão, rc=");
+        //Serial.print(" [Task ConectarMQTT] Falha na conexão, rc=");
         Serial.print(mqttClient.state());
-        Serial.println(". Tentando novamente em 5 segundos...");
+        //Serial.println(". Tentando novamente em 5 segundos...");
         vTaskDelay(pdMS_TO_TICKS(5000));
       }
     } else {
@@ -141,23 +141,26 @@ void TaskConectarMQTT(void *pvParameters) {
 
 // ======= TAREFA DE LEITURA RFID ========
 void TaskLeituraRFID(void *pvParameters) {
-    Serial.println("Task LeituraRFID: Iniciando.");
+    //Serial.println("Task LeituraRFID: Iniciando.");
 
     rfid.begin(&Serial2, 115200, 16, 17);
+    
     rfid.setRFParameters(2500, 0x04);
+
+    rfid.setQueryParameters(2);
 
     unsigned long initial_delay_ms = T_SLOT_COMPLETO_MODULO * MEU_SLOT_INDEX;
     if (initial_delay_ms > 0) {
-        Serial.printf("Task LeituraRFID: Delay inicial de escalonamento de %lu ms.\n", initial_delay_ms);
+        //Serial.printf("Task LeituraRFID: Delay inicial de escalonamento de %lu ms.\n", initial_delay_ms);
         vTaskDelay(pdMS_TO_TICKS(initial_delay_ms));
     }
-    Serial.println("Task LeituraRFID: Escalonamento inicial concluído.");
+    //Serial.println("Task LeituraRFID: Escalonamento inicial concluído.");
 
     unsigned long ultimoPollNaJanela = 0;
     char epc_buffer[30];
 
     while (1) {
-        Serial.println("Task LeituraRFID: Iniciando Janela Ativa de Leitura...");
+        //Serial.println("Task LeituraRFID: Iniciando Janela Ativa de Leitura...");
         unsigned long inicioJanelaAtiva = millis();
         ultimoPollNaJanela = inicioJanelaAtiva - T_INTERVALO_POLL_NA_JANELA; 
 
@@ -184,23 +187,23 @@ void TaskLeituraRFID(void *pvParameters) {
             }
             vTaskDelay(pdMS_TO_TICKS(1));
         }
-        Serial.println("Task LeituraRFID: Fim da Janela Ativa de Leitura.");
+        //Serial.println("Task LeituraRFID: Fim da Janela Ativa de Leitura.");
 
         vTaskDelay(pdMS_TO_TICKS(T_PAUSA_CURTA_POS_JANELA));
 
-        Serial.printf("Task LeituraRFID: Iniciando Fase de Espera por %lu ms...\n", T_ESPERA_OUTROS_MODULOS);
+        //Serial.printf("Task LeituraRFID: Iniciando Fase de Espera por %lu ms...\n", T_ESPERA_OUTROS_MODULOS);
         vTaskDelay(pdMS_TO_TICKS(T_ESPERA_OUTROS_MODULOS));
-        Serial.println("Task LeituraRFID: Fim da Fase de Espera.");
+        //Serial.println("Task LeituraRFID: Fim da Fase de Espera.");
     }
     vTaskDelete(NULL);
 }
 
 // ======= TAREFA EM LOOP: PUBLICAR DADOS MQTT (Recebe da fila) ========
 void TaskPublicarMQTT(void *pvParameters) {
-    Serial.println("Task PublicarMQTT: Aguardando conexão MQTT...");
+    //Serial.println("Task PublicarMQTT: Aguardando conexão MQTT...");
     xSemaphoreTake(mqttConectadoSemaphore, portMAX_DELAY); 
 
-    Serial.println("Task PublicarMQTT: MQTT conectado. Iniciando publicações.");
+    //Serial.println("Task PublicarMQTT: MQTT conectado. Iniciando publicações.");
 
     char epc_recebido[30];
 
@@ -215,7 +218,7 @@ void TaskPublicarMQTT(void *pvParameters) {
         }
 
         if (xQueueReceive(rfidDataQueue, (void*)&epc_recebido, pdMS_TO_TICKS(100))) {
-            Serial.print("Task PublicarMQTT: Recebido da fila para publicar: "); Serial.println(epc_recebido);
+            //Serial.print("Task PublicarMQTT: Recebido da fila para publicar: "); Serial.println(epc_recebido);
             publicarMQTT(String(epc_recebido)); 
         }
         

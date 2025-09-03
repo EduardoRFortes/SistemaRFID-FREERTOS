@@ -216,56 +216,109 @@ bool R200::parseReceivedData() {
   }
 }
 
-// Implementação da nova função que ajusta potência e sensibilidade
+
 void R200::setRFParameters(uint16_t transmitPower, uint8_t demodulatorParameter) {
-    // 1. Configurar a potência de transmissão
+
     uint8_t command_power[] = {
         R200_FrameHeader,
         FrameType_Command,
         CMD_SetTransmitPower,
-        0x00, 0x02, // ParamLength: 2 bytes
-        (uint8_t)(transmitPower >> 8),     // Potência MSB
-        (uint8_t)(transmitPower & 0xFF),   // Potência LSB
-        0x00, // Placeholder para o checksum
+        0x00, 0x02,
+        (uint8_t)(transmitPower >> 8),
+        (uint8_t)(transmitPower & 0xFF),
+        0x00,
         R200_FrameEnd
     };
     
-    // O checksum é calculado a partir do 'FrameType' (índice 1) até o último parâmetro
-    uint8_t checksum_power = calculateCheckSum(&command_power[R200_TypePos]);
+    uint8_t checksum_power = 0;
+
+    for(int i = 1; i < sizeof(command_power) - 2; i++) {
+        checksum_power += command_power[i];
+    }
     command_power[7] = checksum_power;
-    
-    // Envia o comando completo para o módulo
+
+    for(int i = 0; i < 9; i++){
+      Serial.println(command_power[i], HEX);
+    }
+
+
     _serial->write(command_power, sizeof(command_power));
     
     Serial.print("Potência de transmissão configurada para: ");
     Serial.print(transmitPower);
     Serial.println(" (valor bruto)");
 
-    // Aguarda a resposta do módulo (opcional, mas recomendado)
-    receiveData();
+    // Espera e lê a resposta do módulo via Serial2
+    if (receiveData()) {
+        Serial.print("Resposta do modulo (Potencia): ");
+        dumpReceiveBufferToSerial();
+    } else {
+        Serial.println("Tempo esgotado para a resposta do modulo.");
+    }
 
     // 2. Configurar os parâmetros do demodulador (sensibilidade)
     uint8_t command_demod[] = {
         R200_FrameHeader,
         FrameType_Command,
         CMD_SetReceiverDemodulatorParameters,
-        0x00, 0x01, // ParamLength: 1 byte
+        0x00, 0x01,
         demodulatorParameter,
-        0x00, // Placeholder para o checksum
+        0x00,
         R200_FrameEnd
     };
 
-    uint8_t checksum_demod = calculateCheckSum(&command_demod[R200_TypePos]);
+    uint8_t checksum_demod = 0;
+    for(int i = 1; i < sizeof(command_demod) - 2; i++) {
+        checksum_demod += command_demod[i];
+    }
     command_demod[6] = checksum_demod;
 
-    // Envia o comando completo para o módulo
     _serial->write(command_demod, sizeof(command_demod));
 
     Serial.print("Parâmetros do demodulador configurados para: 0x");
     Serial.println(demodulatorParameter, HEX);
 
-    // Aguarda a resposta do módulo (opcional, mas recomendado)
-    receiveData();
+    // Espera e lê a resposta do módulo via Serial2
+    if (receiveData()) {
+        Serial.print("Resposta do modulo (Demodulador): ");
+        dumpReceiveBufferToSerial();
+    } else {
+        Serial.println("Tempo esgotado para a resposta do modulo.");
+    }
+}
+
+void R200::setQueryParameters(uint8_t qValue) {
+
+    uint8_t command_query[] = {
+        R200_FrameHeader,
+        FrameType_Command,
+        CMD_SetQueryParameters,
+        0x00, 0x04,
+        0x03,
+        0x00,
+        qValue,
+        0x00,
+        R200_FrameEnd
+    };
+
+    uint8_t checksum_query = 0;
+    for(int i = 1; i < sizeof(command_query) - 2; i++) {
+        checksum_query += command_query[i];
+    }
+    command_query[8] = checksum_query;
+
+    _serial->write(command_query, sizeof(command_query));
+
+    Serial.print("Parametros de Query ajustados. Q Value: ");
+    Serial.println(qValue);
+
+    // Espera e lê a resposta do módulo via Serial2
+    if (receiveData()) {
+        Serial.print("Resposta do modulo (Query): ");
+        dumpReceiveBufferToSerial();
+    } else {
+        Serial.println("Tempo esgotado para a resposta do modulo.");
+    }
 }
 
 void R200::acquireTransmitPower() {

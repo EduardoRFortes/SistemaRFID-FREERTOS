@@ -38,6 +38,7 @@ class R200 {
     void setMultiplePollingMode(bool enable=true);
     void dumpModuleInfo();
     bool dataAvailable();
+    void setQueryParameters(uint8_t qValue);
     void setRFParameters(uint16_t transmitPower, uint8_t demodulatorParameter);
     
 
