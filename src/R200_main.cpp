@@ -3,7 +3,7 @@
 #include <PubSubClient.h>     
 #include <ArduinoJson.h>
 #include "R200.h"             
-#include <time.h>             
+#include <sys/time.h>             
 #include <Preferences.h>      
 
 // ====================================================================
@@ -41,8 +41,12 @@ const int PORTA_MQTT = 8883;
 const char* CLIENT_ID = "portal_entrada_5C01";
 const char* TOPICO_MQTT = "/rfid/leituras";
 
+const long intervalMicroseconds = 200000;
+struct timeval previous_time;
+
+const unsigned long T_DELAY_ENTRE_MODULOS = 100;
 const unsigned long T_JANELA_ATIVA_MODULO = 150;
-const unsigned long T_INTERVALO_POLL_NA_JANELA = 50;
+const unsigned long T_INTERVALO_POLL_NA_JANELA = 100;
 const unsigned long T_PAUSA_CURTA_POS_JANELA = 5;
 
 const unsigned long T_SLOT_COMPLETO_MODULO = T_JANELA_ATIVA_MODULO + T_PAUSA_CURTA_POS_JANELA;
@@ -141,61 +145,62 @@ void TaskConectarMQTT(void *pvParameters) {
 
 // ======= TAREFA DE LEITURA RFID ========
 void TaskLeituraRFID(void *pvParameters) {
-    //Serial.println("Task LeituraRFID: Iniciando.");
-
+    // Inicializações de RFID
     rfid.begin(&Serial2, 115200, 16, 17);
+    rfid.setRFParameters(3000, 0x01);
+    rfid.setQueryParameters(0);
+
+    struct timeval timeinfo;
+
+    unsigned long iniciarDelay;
     
-    rfid.setRFParameters(2500, 0x04);
-
-    rfid.setQueryParameters(2);
-
-    unsigned long initial_delay_ms = T_SLOT_COMPLETO_MODULO * MEU_SLOT_INDEX;
-    if (initial_delay_ms > 0) {
-        //Serial.printf("Task LeituraRFID: Delay inicial de escalonamento de %lu ms.\n", initial_delay_ms);
-        vTaskDelay(pdMS_TO_TICKS(initial_delay_ms));
+    // Lógica para escalonar os módulos
+    while(!iniciarDelay % T_DELAY_ENTRE_MODULOS == 0){
+      iniciarDelay = gettimeofday(&timeinfo, NULL);
     }
-    //Serial.println("Task LeituraRFID: Escalonamento inicial concluído.");
 
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
     unsigned long ultimoPollNaJanela = 0;
     char epc_buffer[30];
 
     while (1) {
-        //Serial.println("Task LeituraRFID: Iniciando Janela Ativa de Leitura...");
-        unsigned long inicioJanelaAtiva = millis();
-        ultimoPollNaJanela = inicioJanelaAtiva - T_INTERVALO_POLL_NA_JANELA; 
-
-        while (millis() - inicioJanelaAtiva < T_JANELA_ATIVA_MODULO) {
+        // Início do ciclo de leitura do módulo
+        unsigned long inicioJanelaAtiva = gettimeofday(&timeinfo, NULL);
+        
+        // Loop da janela ativa de leitura
+        while (gettimeofday(&timeinfo, NULL) - inicioJanelaAtiva < T_JANELA_ATIVA_MODULO) {
             rfid.loop();
 
-            if (millis() - ultimoPollNaJanela >= T_INTERVALO_POLL_NA_JANELA) {
+            if (gettimeofday(&timeinfo, NULL) - ultimoPollNaJanela >= T_INTERVALO_POLL_NA_JANELA) {
                 rfid.poll();
-                ultimoPollNaJanela = millis();
+                ultimoPollNaJanela = gettimeofday(&timeinfo, NULL);
             }
 
-            rfid.loop();
             if (rfid.epc.length() > 0) {
-                Serial.print("Task LeituraRFID: TAG LIDA: "); Serial.println(rfid.epc);
+                // Registra o timestamp da leitura
+                time_t now = time(nullptr);
                 
-                String epc_puro = rfid.epc.substring(0, 22); // Ler apenas os primeiros 24 caracteres válidos da Tag(EPC);
-
+                // Imprime a tag e o timestamp para depuração
+                Serial.printf("TAG LIDA: %s | Timestamp: %ld\n", rfid.epc.c_str(), now);
+                
+                String epc_puro = rfid.epc.substring(0, 22);
                 epc_puro.toCharArray(epc_buffer, sizeof(epc_buffer));
                 
                 if (xQueueSend(rfidDataQueue, (void*)&epc_buffer, pdMS_TO_TICKS(10)) != pdPASS) {
-                    Serial.println("Task LeituraRFID: Falha ao enviar TAG para a fila MQTT (fila cheia?).");
+                    Serial.println("Falha ao enviar TAG para a fila.");
                 }
                 rfid.epc = "";
             }
             vTaskDelay(pdMS_TO_TICKS(1));
-        }
-        //Serial.println("Task LeituraRFID: Fim da Janela Ativa de Leitura.");
+        }     
 
+        // Delay de espera curta entre janelas (para comunicação com o outro módulo)
         vTaskDelay(pdMS_TO_TICKS(T_PAUSA_CURTA_POS_JANELA));
 
-        //Serial.printf("Task LeituraRFID: Iniciando Fase de Espera por %lu ms...\n", T_ESPERA_OUTROS_MODULOS);
+        // Delay de espera longa para dar tempo ao outro módulo operar
         vTaskDelay(pdMS_TO_TICKS(T_ESPERA_OUTROS_MODULOS));
-        //Serial.println("Task LeituraRFID: Fim da Fase de Espera.");
     }
-    vTaskDelete(NULL);
 }
 
 // ======= TAREFA EM LOOP: PUBLICAR DADOS MQTT (Recebe da fila) ========
@@ -234,6 +239,8 @@ void setup() {
   NVS_SSID = "nersec";
   NVS_SENHA = "gremio123";
   NVS_BROKER_MQTT = "mosquittoserver.lan";
+
+  gettimeofday(&previous_time, NULL);
 
   preferences.begin("CERTS", true);
 
