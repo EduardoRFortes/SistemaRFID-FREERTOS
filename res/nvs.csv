@@ -1,5 +1,5 @@
 key,type,encoding,value
 CERTS,namespace,,
-tarnodePUB,file,string,/etc/mosquitto/meus_certificados/nodes/tarnode1.1.lan.crt.pem
-tarnodePRIV,file,string,/etc/mosquitto/meus_certificados/nodes/tarnode1.1.lan.key
+tarnodePUB,file,string,/etc/mosquitto/meus_certificados/nodes/tarnode1.4.lan.crt.pem
+tarnodePRIV,file,string,/etc/mosquitto/meus_certificados/nodes/tarnode1.4.lan.key
 tarnodeCHAIN,file,string,/etc/mosquitto/meus_certificados/ca_chain.crt.pem

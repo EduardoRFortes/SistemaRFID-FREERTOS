@@ -12,14 +12,16 @@ bool R200::begin(HardwareSerial *serial, int baud, uint8_t RxPin, uint8_t TxPin)
   return true;
 };
 
-void printHexByte(char* name, uint8_t value){
+// CORREÇÃO: Usando 'const char*' para evitar warnings ISO C++
+void printHexByte(const char* name, uint8_t value){
   Serial.print(name);
   Serial.print(":");
   Serial.print(value < 0x10 ? "0x0" : "0x");
   Serial.println(value, HEX);
 }
 
-void printHexBytes(char* name, uint8_t *value, uint8_t len){
+// CORREÇÃO: Usando 'const char*' para evitar warnings ISO C++
+void printHexBytes(const char* name, uint8_t *value, uint8_t len){
   Serial.print(name);
   Serial.print(":");
   Serial.print("0x");
@@ -30,7 +32,8 @@ void printHexBytes(char* name, uint8_t *value, uint8_t len){
   Serial.println("");
 }
 
-void printHexWord(char* name, uint8_t MSB, uint8_t LSB){
+// CORREÇÃO: Usando 'const char*' para evitar warnings ISO C++
+void printHexWord(const char* name, uint8_t MSB, uint8_t LSB){
   Serial.print(name);
   Serial.print(":");
   Serial.print(MSB < 0x10 ? "0x0" : "0x");
@@ -79,11 +82,14 @@ void R200::loop(){
               printHexBytes("EPC(", &_buffer[9], 12);
             #endif
             
+            // CORREÇÃO: A string 'epc' é preenchida AQUI em todo ciclo de sucesso.
             for (int i = 0; i < 12; i++) {
               if (_buffer[9 + i] < 0x10) epc += "0"; // zero padding
               epc += String(_buffer[9 + i], HEX);
             }
             epc.toUpperCase(); // opcional
+
+            // O if/else agora é puramente para debug. O 'epc' será enviado de toda forma.
             if(memcmp(uid, &_buffer[9], 12) != 0) {
               memcpy(uid, &_buffer[9], 12);
               #ifdef DEBUG
@@ -112,6 +118,9 @@ void R200::loop(){
                 // This is not necessarily a "failure" - it just means that there are no cards in range
                 // Serial.print("No card detected!");
                 // If there was previously a uid
+                
+                // ALTERAÇÃO: Lógica de "Card removed" comentada para evitar instabilidade.
+                /*
                 if(memcmp(uid, blankUid, sizeof uid) != 0) {
                   #ifdef DEBUG
                     Serial.print("Card removed : ");
@@ -120,6 +129,7 @@ void R200::loop(){
                   #endif
                   memset(uid, 0, sizeof uid);
                 }
+                */
                 break;
               case ERR_AccessFail:
                 // Serial.println("Access Fail");
@@ -214,6 +224,8 @@ bool R200::parseReceivedData() {
     default:
       break;
   }
+  // CORREÇÃO: Adicionando retorno para corrigir warning
+  return false;
 }
 
 
@@ -349,7 +361,7 @@ uint8_t R200::flush(){
 // This could either be a response to a command sent, or a notification
 // (e.g. when set to automatic polling mode)
 // Returns true if a complete frame of data is read within the allotted timeout
-bool R200::receiveData(unsigned long timeOut){
+bool R200::receiveData(unsigned long timeOut){ 
   //Serial.println("Receiving Data");
   unsigned long startTime = millis();
   uint8_t bytesReceived = 0;
@@ -450,19 +462,6 @@ uint8_t R200::calculateCheckSum(uint8_t *buffer){
   }
   // Now only return LSB
   return (check & 0xff);
-
-  /*
-  // This is an alternative checksum calculation sometimes used
-  uint16_t paramLength = *(buffer+3);
-  paramLength <<=8;
-  paramLength += *(buffer+4);
-
-  uint16_t sum = 0;
-  for (int i=1; i<4+paramLength; i++) {
-    sum += buffer[i];
-  }
-  return -sum;
-  */
 }
 
 uint16_t R200::arrayToUint16(uint8_t *array){

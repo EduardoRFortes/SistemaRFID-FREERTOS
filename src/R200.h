@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <Arduino.h>
 
-#define RX_BUFFER_LENGTH 64
+#define RX_BUFFER_LENGTH 128
 
 class R200 {
 
@@ -19,7 +19,7 @@ class R200 {
     void sendCommand(uint8_t* command, uint8_t length);
     bool parseReceivedData();
     bool dataIsValid();
-    bool receiveData(unsigned long timeOut = 500);
+    bool receiveData(unsigned long timeOut = 1000);
     void dumpReceiveBufferToSerial();
     uint8_t flush();
 
