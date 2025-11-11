@@ -74,10 +74,13 @@ void publicarMQTT(const String& epc) {
     mqttClient.connect(CLIENT_ID); 
   }
 
+  int epochValue = time(nullptr);
+
   if (mqttClient.connected()) {
       JsonDocument doc;
       doc["epc"] = epc;
       doc["mqttId"] = CLIENT_ID; 
+      doc["timestamp"] = epochValue;
 
       String jsonString;
       serializeJson(doc, jsonString);
