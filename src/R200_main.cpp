@@ -6,6 +6,7 @@
 #include <sys/time.h>             
 #include <Preferences.h>
 #include <esp_task_wdt.h>
+#include <ESPping.h>
 
 
 // ====================================================================
@@ -98,7 +99,14 @@ void publicarMQTT(const String& epc) {
 // ======= TAREFA DE INICIALIZAÇÃO E RECONEXÃO WI-FI ========
 void TaskConectarWiFi(void *pvParameters) {
   Serial.print("Task ConectarWiFi: Iniciando conexão Wi-Fi...");
+  IPAddress primaryDNS(172, 16, 0, 1);
+  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, primaryDNS, primaryDNS);
   WiFi.begin(NVS_SSID.c_str(), NVS_SENHA.c_str()); 
+  // 172.16.5.11
+  // 88:13:BF:C8:6A:68
+
+  Serial.println("Servidor DNS: ");
+  Serial.println(WiFi.dnsIP());
   while (WiFi.status() != WL_CONNECTED) {
     vTaskDelay(pdMS_TO_TICKS(500));
     Serial.print(".");
@@ -189,12 +197,13 @@ void setup() {
   Serial.begin(115200);
 
   esp_task_wdt_init(20, true);
+
   
   Serial.println("Iniciando: " __FILE__ " " __DATE__);
 
   NVS_SSID = "INFRA_CTISM";
   NVS_SENHA = "teste001";
-  NVS_BROKER_MQTT = "mosquittoserver.lan";
+  NVS_BROKER_MQTT = "mosquittoserver.controle.ufsm";
 
   preferences.begin("CERTS", true);
 
@@ -347,7 +356,7 @@ void setupNVS() {
     
     preferences.putString("ssid", "INFRA_CTISM");          
     preferences.putString("senha", "teste001");      
-    preferences.putString("broker_mqtt", "mosquittoserver.lan"); 
+    preferences.putString("broker_mqtt", "mosquittoserver.controle.ufsm"); 
 
     preferences.end(); 
     Serial.println("Configurações de rede e broker gravadas no NVS.");
