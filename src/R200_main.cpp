@@ -18,16 +18,10 @@
 #include <freertos/semphr.h>
 // ====================================================================
 
-// ====================================================================
-// ======= PROTÓTIPOS DE FUNÇÃO (CORREÇÃO DO ERRO DE ESCOPO) ===========
-// O compilador precisa saber que essas funções existem antes de serem chamadas no setup()
 void TaskConectarWiFi(void *pvParameters);
 void TaskConectarMQTT(void *pvParameters);
 void TaskPublicarMQTT(void *pvParameters);
-// A lógica de leitura está no loop() principal agora
-// ====================================================================
 
-// ====================================================================
 // ======= DECLARAÇÕES DE OBJETOS E VARIÁVEIS GLOBAIS =================
 
 WiFiClientSecure espClient;
@@ -56,9 +50,6 @@ String MQTT_CA_CERT_PROGMEM;
 const int PORTA_MQTT = 8883;
 const char* CLIENT_ID = "portal_ESP_02";
 const char* TOPICO_MQTT = "/rfid/leituras";
-
-// CONSTANTES DO WATCH DOG
-
 
 // DEFININDO O INTERVALO MÍNIMO ESTÁVEL DE LEITURA (200ms)
 const unsigned long T_INTERVALO_LEITURA_MS = 200; 
@@ -102,15 +93,18 @@ void TaskConectarWiFi(void *pvParameters) {
   IPAddress primaryDNS(172, 16, 0, 1);
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, primaryDNS, primaryDNS);
   WiFi.begin(NVS_SSID.c_str(), NVS_SENHA.c_str()); 
+
   // 172.16.5.11
   // 88:13:BF:C8:6A:68
 
   Serial.println("Servidor DNS: ");
   Serial.println(WiFi.dnsIP());
+
   while (WiFi.status() != WL_CONNECTED) {
     vTaskDelay(pdMS_TO_TICKS(500));
     Serial.print(".");
   }
+  
   Serial.println("\nTask ConectarWiFi: Wi-Fi conectado! IP: " + WiFi.localIP().toString());
 
   Serial.println("\nEndereço MAC:");
@@ -143,7 +137,6 @@ void TaskConectarMQTT(void *pvParameters) {
   const char* client_cert = CLIENT_CERT_PROGMEM.c_str();
   const char* client_key = CLIENT_KEY_PROGMEM.c_str();
 
-  // Autenticação Mútua (mTLS)
   espClient.setCACert(ca_cert);
   espClient.setCertificate(client_cert);
   espClient.setPrivateKey(client_key);
@@ -185,7 +178,6 @@ void TaskPublicarMQTT(void *pvParameters) {
             continue; 
         }
 
-        // Aumentando o timeout de recebimento para 500ms
         if (xQueueReceive(rfidDataQueue, (void*)&epc_recebido, pdMS_TO_TICKS(500))) { 
             publicarMQTT(String(epc_recebido)); 
         }
@@ -215,7 +207,6 @@ void setup() {
 
   MySerial.begin(115200, SERIAL_8N1, 16, 17);
 
-  // --- CRIAÇÃO DOS SEMÁFOROS E FILAS ---
   wifiConectadoSemaphore = xSemaphoreCreateBinary();
   mqttConectadoSemaphore = xSemaphoreCreateBinary();
   
@@ -224,17 +215,12 @@ void setup() {
     while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); } 
   }
 
-  // Tamanho da fila aumentado para 20
   rfidDataQueue = xQueueCreate(20, sizeof(char[30])); 
   if (rfidDataQueue == NULL) {
       Serial.println("ERRO: Falha ao criar a fila de dados RFID! Sistema parado.");
       while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
   }
 
-  // --- CONFIGURAÇÃO INICIAL DO RFID (FORA DA THREAD) ---
-  // A configuração é executada no setup() para ser feita apenas uma vez.
-  
-  // 1. POTÊNCIA (2500 para estabilidade de energia)
   if (rfidReader.setTransmitPower(2500)) {
       Serial.println("Potência definida com SUCESSO.");
   } else {
@@ -251,14 +237,12 @@ void setup() {
       Serial.println("FALHA ao definir os parâmetros do demodulador! (Ignorando falha)");
   }
   
-  // 3. ALGORITMO OTIMIZADO
   if(rfidReader.setQueryParameters(1, 1, 1, 0)) {
       Serial.println("Parâmetros de Query definidos com SUCESSO.");
   } else {
       Serial.println("FALHA ao definir os parâmetros de Query! (Ignorando falha)");
   }
   
-  // 4. Garante o modo Single Poll
   rfidReader.stopMultiplePolling(); 
 
 
@@ -268,7 +252,7 @@ void setup() {
     "Conectar-WiFi",
     4096,
     NULL,
-    5, // Prioridade 5
+    5, 
     NULL,
     0
   );
@@ -282,15 +266,13 @@ void setup() {
     NULL,
     1
   );
-
-  // Não precisamos mais da TaskLeituraRFID; a lógica está no loop()
   
   xTaskCreatePinnedToCore(
     TaskPublicarMQTT, 
     "Publicar-MQTT",
     8192,
     NULL,
-    5, // Prioridade 5 (Máxima)
+    5, 
     NULL,
     0
   );
@@ -301,7 +283,7 @@ void setup() {
 
 // ======= LOOP PRINCIPAL DO ARDUINO (LEITURA) ========
 void loop() {
-  // Lógica de Leitura RFID no Loop Principal
+
   static unsigned long ultimoPoll = 0;
   static uint8_t responseBuffer[256];
   static const uint32_t GET_RESPONSE_TIMEOUT_MS = 1000; 
@@ -310,7 +292,6 @@ void loop() {
       
       MySerial.flush(); 
 
-      // 2. Envia o comando de POLL MANUAL
       rfidReader.initiateSinglePolling(); 
       ultimoPoll = millis();
       
@@ -346,11 +327,9 @@ void loop() {
       }
   }
   
-  // Damos tempo para o FreeRTOS rodar as outras tarefas
   vTaskDelay(pdMS_TO_TICKS(1)); 
 }
 
-// ======= FUNÇÃO PARA GRAVAR DADOS NO NVS (NÃO SERÁ CHAMADA NESTA EXECUÇÃO) ========
 void setupNVS() {
     preferences.begin("mqtt_config", false); 
     
