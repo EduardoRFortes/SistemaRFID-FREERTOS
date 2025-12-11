@@ -18,6 +18,7 @@
 #include <freertos/semphr.h>
 // ====================================================================
 
+// Protótipos
 void TaskConectarWiFi(void *pvParameters);
 void TaskConectarMQTT(void *pvParameters);
 void TaskPublicarMQTT(void *pvParameters);
@@ -57,13 +58,20 @@ const unsigned long T_INTERVALO_LEITURA_MS = 200;
 const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -3 * 3600;
 const int daylightOffset_sec = 0;
+
+// Configuração do Watchdog (20 segundos)
+#define WDT_TIMEOUT 20
+
 // ====================================================================
 
-// ======= FUNÇÃO AUXILIAR DE PUBLICAÇÃO MQTT ========
-void publicarMQTT(const String& epc) {
+// ======= FUNÇÃO AUXILIAR DE PUBLICAÇÃO MQTT (Otimizada) ========
+// Alterado para receber const char* para evitar criação de Strings desnecessárias na entrada
+void publicarMQTT(const char* epc) {
   if (!mqttClient.connected()) {
-    Serial.println("PublicarMQTT (auxiliar): Conexão MQTT perdida. Tentando reconectar para esta pub...");
-    mqttClient.connect(CLIENT_ID); 
+    Serial.println("PublicarMQTT: Conexão perdida. Tentando reconectar...");
+    if(!mqttClient.connect(CLIENT_ID)) {
+       return;
+    }
   }
 
   int epochValue = time(nullptr);
@@ -78,12 +86,10 @@ void publicarMQTT(const String& epc) {
       serializeJson(doc, jsonString);
 
       if (mqttClient.publish(TOPICO_MQTT, jsonString.c_str())) {
-        //Serial.println("Publicado via MQTT: " + jsonString);
+        // Sucesso
       } else {
-        Serial.println("Falha ao publicar via MQTT (cliente conectado).");
+        Serial.println("Falha ao publicar via MQTT.");
       }
-  } else {
-      Serial.println("PublicarMQTT (auxiliar): Não foi possível publicar: Cliente não conectado.");
   }
 }
 
@@ -94,9 +100,6 @@ void TaskConectarWiFi(void *pvParameters) {
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, primaryDNS, primaryDNS);
   WiFi.begin(NVS_SSID.c_str(), NVS_SENHA.c_str()); 
 
-  // 172.16.5.11
-  // 88:13:BF:C8:6A:68
-
   Serial.println("Servidor DNS: ");
   Serial.println(WiFi.dnsIP());
 
@@ -104,14 +107,9 @@ void TaskConectarWiFi(void *pvParameters) {
     vTaskDelay(pdMS_TO_TICKS(500));
     Serial.print(".");
   }
-  
-  Serial.println("\nTask ConectarWiFi: Wi-Fi conectado! IP: " + WiFi.localIP().toString());
 
-  Serial.println("\nEndereço MAC:");
-  Serial.println(WiFi.macAddress());
+  Serial.println("\nTask ConectarWiFi: Wi-Fi conectado! IP: " + WiFi.localIP().toString());
   
-  // Reabilitando o NTP para correta validação de certificado
-  Serial.println("Sincronizando hora com NTP....");
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
@@ -120,19 +118,16 @@ void TaskConectarWiFi(void *pvParameters) {
     Serial.println(&timeinfo, "Hora atual: %A, %B %d %Y %H:%M:%S");
   }
 
-
   xSemaphoreGive(wifiConectadoSemaphore); 
   Serial.println("Task ConectarWiFi: Concluída e se auto-deletando.");
-
   vTaskDelete(NULL);
 }
 
 // ======= TAREFA DE CONEXÃO E RECONEXÃO MQTT ========
 void TaskConectarMQTT(void *pvParameters) {
-  Serial.println("Task ConectarMQTT: Aguardando conexão Wi-Fi...");
+  Serial.println("Task ConectarMQTT: Aguardando Wi-Fi...");
   xSemaphoreTake(wifiConectadoSemaphore, portMAX_DELAY); 
-  Serial.println("Task ConectarMQTT: Wi-Fi conectado, iniciando loop de conexão MQTT...");
-
+  
   const char* ca_cert = MQTT_CA_CERT_PROGMEM.c_str();
   const char* client_cert = CLIENT_CERT_PROGMEM.c_str();
   const char* client_key = CLIENT_KEY_PROGMEM.c_str();
@@ -145,24 +140,24 @@ void TaskConectarMQTT(void *pvParameters) {
 
   while (true) {
     if (!mqttClient.connected()) {
-      Serial.print("Task ConectarMQTT: Tentando conectar ao broker MQTT...");
+      Serial.print("Task ConectarMQTT: Conectando...");
       String currentClientId = String(CLIENT_ID) + "_" + String(esp_random(), HEX); 
       
       if (mqttClient.connect(currentClientId.c_str())) {
-        Serial.println("\n[Task ConectarMQTT] Conectado ao MQTT!");
+        Serial.println("\n[MQTT] Conectado!");
         xSemaphoreGive(mqttConectadoSemaphore); 
       } else {
-        Serial.print(" [Task ConectarMQTT] Falha na conexão, rc=");
+        Serial.print(" Falha rc=");
         Serial.print(mqttClient.state());
-        vTaskDelay(pdMS_TO_TICKS(10000));
+        vTaskDelay(pdMS_TO_TICKS(5000)); 
       }
     } else {
-      vTaskDelay(pdMS_TO_TICKS(100)); 
+      vTaskDelay(pdMS_TO_TICKS(1000)); 
     }
   }
 }
 
-// ======= TAREFA EM LOOP: PUBLICAR DADOS MQTT (Recebe da fila) ========
+// ======= TAREFA EM LOOP: PUBLICAR DADOS MQTT ========
 void TaskPublicarMQTT(void *pvParameters) {
     xSemaphoreTake(mqttConectadoSemaphore, portMAX_DELAY); 
 
@@ -172,14 +167,12 @@ void TaskPublicarMQTT(void *pvParameters) {
         if (mqttClient.connected()) {
             mqttClient.loop(); 
         } else {
-            Serial.println("Task PublicarMQTT: MQTT desconectado. Aguardando reconexão...");
-            xSemaphoreTake(mqttConectadoSemaphore, portMAX_DELAY);
-            Serial.println("Task PublicarMQTT: MQTT Reconectado (sinalizado).");
+            vTaskDelay(pdMS_TO_TICKS(500));
             continue; 
         }
 
-        if (xQueueReceive(rfidDataQueue, (void*)&epc_recebido, pdMS_TO_TICKS(500))) { 
-            publicarMQTT(String(epc_recebido)); 
+        if (xQueueReceive(rfidDataQueue, (void*)&epc_recebido, pdMS_TO_TICKS(100))) { 
+            publicarMQTT(epc_recebido); 
         }
     }
 }
@@ -188,7 +181,8 @@ void TaskPublicarMQTT(void *pvParameters) {
 void setup() {
   Serial.begin(115200);
 
-  esp_task_wdt_init(20, true);
+  esp_task_wdt_init(WDT_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
 
   
   Serial.println("Iniciando: " __FILE__ " " __DATE__);
@@ -198,11 +192,9 @@ void setup() {
   NVS_BROKER_MQTT = "mosquittoserver.controle.ufsm";
 
   preferences.begin("CERTS", true);
-
   CLIENT_CERT_PROGMEM = preferences.getString("tarnodePUB");
   CLIENT_KEY_PROGMEM = preferences.getString("tarnodePRIV");
   MQTT_CA_CERT_PROGMEM = preferences.getString("tarnodeCHAIN");
-  
   preferences.end(); 
 
   MySerial.begin(115200, SERIAL_8N1, 16, 17);
@@ -210,75 +202,19 @@ void setup() {
   wifiConectadoSemaphore = xSemaphoreCreateBinary();
   mqttConectadoSemaphore = xSemaphoreCreateBinary();
   
-  if (wifiConectadoSemaphore == NULL || mqttConectadoSemaphore == NULL) {
-    Serial.println("ERRO: Falha ao criar Semáforos! Sistema parado.");
-    while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); } 
-  }
-
-  rfidDataQueue = xQueueCreate(20, sizeof(char[30])); 
-  if (rfidDataQueue == NULL) {
-      Serial.println("ERRO: Falha ao criar a fila de dados RFID! Sistema parado.");
-      while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
-  }
+  rfidDataQueue = xQueueCreate(50, sizeof(char[30])); 
 
   if (rfidReader.setTransmitPower(2500)) {
       Serial.println("Potência definida com SUCESSO.");
-  } else {
-      Serial.println("FALHA ao definir a potência! (Ignorando falha para continuar)");
   }
   
-  // 2. MODO DE ALTA SENSIBILIDADE
-  uint8_t mixerGain = 0x03; 
-  uint8_t ifGain = 0x06;    
-  uint16_t threshold = 0x01B0;
-  if (rfidReader.setDemodulatorParameters(mixerGain, ifGain, threshold)) {
-      Serial.println("Parâmetros do demodulador definidos com SUCESSO.");
-  } else {
-      Serial.println("FALHA ao definir os parâmetros do demodulador! (Ignorando falha)");
-  }
-  
-  if(rfidReader.setQueryParameters(1, 1, 1, 0)) {
-      Serial.println("Parâmetros de Query definidos com SUCESSO.");
-  } else {
-      Serial.println("FALHA ao definir os parâmetros de Query! (Ignorando falha)");
-  }
-  
+  rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
+  rfidReader.setQueryParameters(1, 1, 1, 0);
   rfidReader.stopMultiplePolling(); 
 
-
-  // --- CRIAÇÃO DAS TAREFAS FREE RTOS ---
-  xTaskCreatePinnedToCore(
-    TaskConectarWiFi, 
-    "Conectar-WiFi",
-    4096,
-    NULL,
-    5, 
-    NULL,
-    0
-  );
-
-  xTaskCreatePinnedToCore(
-    TaskConectarMQTT, 
-    "Conectar-MQTT",
-    12288,
-    NULL,
-    4,
-    NULL,
-    1
-  );
-  
-  xTaskCreatePinnedToCore(
-    TaskPublicarMQTT, 
-    "Publicar-MQTT",
-    8192,
-    NULL,
-    5, 
-    NULL,
-    0
-  );
-
-  Serial.println("Todas as tarefas foram criadas pelo setup().");
-  Serial.println("Sistema iniciado e escalonado (usando FreeRTOS tasks).");
+  xTaskCreatePinnedToCore(TaskConectarWiFi, "Conectar-WiFi", 4096, NULL, 5, NULL, 0);
+  xTaskCreatePinnedToCore(TaskConectarMQTT, "Conectar-MQTT", 12288, NULL, 4, NULL, 1);
+  xTaskCreatePinnedToCore(TaskPublicarMQTT, "Publicar-MQTT", 8192, NULL, 5, NULL, 0);
 }
 
 // ======= LOOP PRINCIPAL DO ARDUINO (LEITURA) ========
@@ -288,6 +224,8 @@ void loop() {
   static uint8_t responseBuffer[256];
   static const uint32_t GET_RESPONSE_TIMEOUT_MS = 1000; 
 
+  esp_task_wdt_reset();
+
   if (millis() - ultimoPoll >= T_INTERVALO_LEITURA_MS) {
       
       MySerial.flush(); 
@@ -296,48 +234,44 @@ void loop() {
       ultimoPoll = millis();
       
       if (rfidReader.getResponse(responseBuffer, 256, GET_RESPONSE_TIMEOUT_MS)) {
-        esp_task_wdt_add(NULL);
+          
           if(rfidReader.hasValidTag(responseBuffer)) {
               uint8_t rssi;
               uint8_t epc[12];
               rfidReader.parseTagResponse(responseBuffer, rssi, epc);
 
-              String epc_string = "";
-              for (int i = 0; i < 12; ++i) {
-                  if (epc[i] < 0x10) epc_string += "0";
-                  epc_string += String(epc[i], HEX);
-              }
+              char epc_hex_str[25]; 
               
-              epc_string.toUpperCase(); 
+              snprintf(epc_hex_str, sizeof(epc_hex_str), 
+                       "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
+                       epc[0], epc[1], epc[2], epc[3], epc[4], epc[5], 
+                       epc[6], epc[7], epc[8], epc[9], epc[10], epc[11]
+                      );
 
-              if (epc_string.startsWith("0000000000000000")) {
-              } else {
-                  Serial.printf("TAG LIDA: %s | RSSI: %d\n", epc_string.c_str(), rssi);
+              if (strcmp(epc_hex_str, "000000000000000000000000") != 0) {
                   
-                  char epc_buffer[30];
-                  epc_string.substring(0, 24).toCharArray(epc_buffer, sizeof(epc_buffer));
+                  Serial.printf("TAG: %s | RSSI: %d\n", epc_hex_str, rssi);
                   
-                  // 4. Envia para a fila MQTT
-                  if (xQueueSend(rfidDataQueue, (void*)&epc_buffer, pdMS_TO_TICKS(10)) != pdPASS) { 
-                      Serial.println("Falha ao enviar TAG para a fila. (Fila Cheia)");
+                  if (xQueueSend(rfidDataQueue, (void*)&epc_hex_str, pdMS_TO_TICKS(10)) != pdPASS) { 
+                      Serial.println("Fila Cheia!");
                   }
               }
           }
-        esp_task_wdt_reset();
       }
   }
   
   vTaskDelay(pdMS_TO_TICKS(1)); 
 }
 
+// ======= FUNÇÃO PARA GRAVAR DADOS NO NVS (Executar apenas se necessário) ========
 void setupNVS() {
-    preferences.begin("mqtt_config", false); 
+    preferences.begin("mqtt_config", false); // false = modo leitura/escrita
     
+    // Grava as chaves apenas se você chamar esta função no setup()
     preferences.putString("ssid", "INFRA_CTISM");          
     preferences.putString("senha", "teste001");      
     preferences.putString("broker_mqtt", "mosquittoserver.controle.ufsm"); 
 
     preferences.end(); 
     Serial.println("Configurações de rede e broker gravadas no NVS.");
-    
 }
