@@ -55,7 +55,7 @@ const char* TOPICO_MQTT = "/rfid/leituras";
 // DEFININDO O INTERVALO MÍNIMO ESTÁVEL DE LEITURA (200ms)
 const unsigned long T_INTERVALO_LEITURA_MS = 200; 
 
-const char* ntpServer = "pool.ntp.org";
+const char* ntpServer = "172.16.0.1";
 const long gmtOffset_sec = -3 * 3600;
 const int daylightOffset_sec = 0;
 
@@ -75,7 +75,7 @@ void publicarMQTT(const char* epc) {
   }
 
   int epochValue = time(nullptr);
-
+  Serial.println(epochValue);
   if (mqttClient.connected()) {
       JsonDocument doc;
       doc["epc"] = epc;
@@ -112,10 +112,13 @@ void TaskConectarWiFi(void *pvParameters) {
   
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    Serial.println("Falha ao obter o tempo via NTP.");
+
+  Serial.println("Solicitando hora ao servidor interno (172.16.0.1)...");
+  
+  if (!getLocalTime(&timeinfo, 5000)) {
+    Serial.println("ERRO: O servidor 172.16.0.1 não respondeu ao NTP.");
   } else {
-    Serial.println(&timeinfo, "Hora atual: %A, %B %d %Y %H:%M:%S");
+    Serial.println(&timeinfo, "SUCESSO NTP INTERNO: %A, %B %d %Y %H:%M:%S");
   }
 
   xSemaphoreGive(wifiConectadoSemaphore); 
@@ -222,9 +225,21 @@ void loop() {
 
   static unsigned long ultimoPoll = 0;
   static uint8_t responseBuffer[256];
-  static const uint32_t GET_RESPONSE_TIMEOUT_MS = 1000; 
+  static const uint32_t GET_RESPONSE_TIMEOUT_MS = 1000;
+  static unsigned long tempoDesconectado = 0;
 
-  esp_task_wdt_reset();
+  if (mqttClient.connected()) {
+      tempoDesconectado = 0; 
+      esp_task_wdt_reset(); 
+  } else {
+
+      if (tempoDesconectado == 0) tempoDesconectado = millis();
+      
+      if (millis() - tempoDesconectado > 120000) {
+          Serial.println("MUITO TEMPO SEM MQTT. REINICIANDO...");
+          ESP.restart();
+      }
+  }
 
   if (millis() - ultimoPoll >= T_INTERVALO_LEITURA_MS) {
       
