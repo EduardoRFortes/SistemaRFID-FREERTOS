@@ -66,7 +66,7 @@ const int daylightOffset_sec = 0;
 
 // ======= FUNÇÃO AUXILIAR DE PUBLICAÇÃO MQTT (Otimizada) ========
 // Alterado para receber const char* para evitar criação de Strings desnecessárias na entrada
-void publicarMQTT(const char* epc) {
+void publicarMQTT(const char* epcData) {
   if (!mqttClient.connected()) {
     Serial.println("PublicarMQTT: Conexão perdida. Tentando reconectar...");
     if(!mqttClient.connect(CLIENT_ID)) {
@@ -77,10 +77,22 @@ void publicarMQTT(const char* epc) {
   int epochValue = time(nullptr);
   Serial.println(epochValue);
   if (mqttClient.connected()) {
+      // Separa "EPC|RSSI" em campos individuais
+      char epc[25] = {};
+      int rssiVal  = 0;
+      const char* pipe = strchr(epcData, '|');
+      if (pipe) {
+          strncpy(epc, epcData, pipe - epcData);
+          rssiVal = atoi(pipe + 1);
+      } else {
+          strncpy(epc, epcData, 24);
+      }
+
       JsonDocument doc;
-      doc["epc"] = epc;
-      doc["mqttId"] = CLIENT_ID; 
+      doc["epc"]       = epc;
+      doc["mqttId"]    = CLIENT_ID;
       doc["timestamp"] = epochValue;
+      doc["rssi"]      = rssiVal;
 
       String jsonString;
       serializeJson(doc, jsonString);
@@ -255,20 +267,55 @@ void loop() {
               uint8_t epc[12];
               rfidReader.parseTagResponse(responseBuffer, rssi, epc);
 
-              char epc_hex_str[25]; 
-              
-              snprintf(epc_hex_str, sizeof(epc_hex_str), 
+              char epc_hex_str[30];
+
+              snprintf(epc_hex_str, 25,
                        "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
-                       epc[0], epc[1], epc[2], epc[3], epc[4], epc[5], 
+                       epc[0], epc[1], epc[2], epc[3], epc[4], epc[5],
                        epc[6], epc[7], epc[8], epc[9], epc[10], epc[11]
                       );
 
               if (strcmp(epc_hex_str, "000000000000000000000000") != 0) {
-                  
+
                   Serial.printf("TAG: %s | RSSI: %d\n", epc_hex_str, rssi);
-                  
-                  if (xQueueSend(rfidDataQueue, (void*)&epc_hex_str, pdMS_TO_TICKS(10)) != pdPASS) { 
-                      Serial.println("Fila Cheia!");
+
+                  // Deduplicação: descarta mesma tag vista há menos de 5s
+                  static char          dedupEpc[8][25] = {};
+                  static unsigned long dedupMs[8]      = {0};
+
+                  bool shouldPublish = true;
+                  int  matchSlot  = -1;
+                  int  freeSlot   = -1;
+                  int  oldestSlot = 0;
+
+                  for (int i = 0; i < 8; i++) {
+                      if (dedupEpc[i][0] != '\0' && strcmp(dedupEpc[i], epc_hex_str) == 0) {
+                          matchSlot = i;
+                          if (millis() - dedupMs[i] < 5000UL) {
+                              shouldPublish = false;
+                          } else {
+                              dedupMs[i] = millis();
+                          }
+                          break;
+                      }
+                      if (dedupEpc[i][0] == '\0' && freeSlot < 0) freeSlot = i;
+                      if (dedupMs[i] < dedupMs[oldestSlot]) oldestSlot = i;
+                  }
+
+                  if (shouldPublish) {
+                      if (matchSlot < 0) {
+                          int slot = (freeSlot >= 0) ? freeSlot : oldestSlot;
+                          strncpy(dedupEpc[slot], epc_hex_str, 24);
+                          dedupEpc[slot][24] = '\0';
+                          dedupMs[slot] = millis();
+                      }
+
+                      // Anexa RSSI ao final: "XXXXXXXXXXXXXXXXXXXXXXXX|rrr"
+                      snprintf(epc_hex_str + 24, 6, "|%d", rssi);
+
+                      if (xQueueSend(rfidDataQueue, (void*)&epc_hex_str, pdMS_TO_TICKS(10)) != pdPASS) {
+                          Serial.println("Fila Cheia!");
+                      }
                   }
               }
           }
