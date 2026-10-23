@@ -1,0 +1,9 @@
+[v3_server]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=@alt_names
+
+[alt_names]
+IP.1 = 172.22.48.145
+DNS.1 = 172.22.48.145

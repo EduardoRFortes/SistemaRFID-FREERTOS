@@ -33,3 +33,15 @@ Com tudo configurado, execute o script scp.sh para carregar os certificados no E
 Observação: Certifique-se de que o script scp.sh está configurado corretamente para o seu ambiente de desenvolvimento e para a porta serial do seu ESP32.
 
 Este guia simplifica o processo, garantindo que os certificados sejam armazenados de forma segura no ESP32, prontos para serem utilizados em comunicações seguras (TLS/SSL).
+
+
+## Config Mosquitto
+
+sudo mosquitto -c /etc/mosquitto/mosquitto.conf -v
+sudo tail -f /var/log/mosquitto/mosquitto.log
+
+cd ~/projetos/SistemaRFID-FREERTOS/certs
+
+mosquitto_sub -h 172.22.48.145 -p 8883 \
+  --cafile ca.crt --cert client.crt --key client.key \
+  -t "/rfid/leituras" -v

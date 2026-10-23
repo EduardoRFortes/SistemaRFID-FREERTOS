@@ -9,59 +9,58 @@
 
 #define RX_BUFFER_LENGTH 128
 
-class R200 {
+class R200
+{
 
-  private:
-    HardwareSerial *_serial;
-    uint8_t _buffer[RX_BUFFER_LENGTH] = {0};
-    uint8_t calculateCheckSum(uint8_t *buffer);
-    uint16_t arrayToUint16(uint8_t *array);
-    void sendCommand(uint8_t* command, uint8_t length);
-    bool parseReceivedData();
-    bool dataIsValid();
-    bool receiveData(unsigned long timeOut = 1000);
-    void dumpReceiveBufferToSerial();
-    uint8_t flush();
+private:
+  HardwareSerial *_serial;
+  uint8_t _buffer[RX_BUFFER_LENGTH] = {0};
+  uint8_t calculateCheckSum(uint8_t *buffer);
+  uint16_t arrayToUint16(uint8_t *array);
+  void sendCommand(uint8_t *command, uint8_t length);
+  bool parseReceivedData();
+  bool dataIsValid();
+  bool receiveData(unsigned long timeOut = 1000);
+  void dumpReceiveBufferToSerial();
+  uint8_t flush();
 
-    const uint8_t blankUid[12] = {0};
+  const uint8_t blankUid[12] = {0};
 
-  public:
-    R200();
+public:
+  R200();
 
-    uint8_t uid[12] = {0};
-    String epc = "";
-    void setContinuousCarrier(bool enable);
-    void acquireTransmitPower();
-    bool begin(HardwareSerial *serial = &Serial2, int baud = 115200, uint8_t RxPin = 16, uint8_t TxPin = 17);
-    void loop();
-    void poll();
-    void setMultiplePollingMode(bool enable=true);
-    void dumpModuleInfo();
-    bool dataAvailable();
-    void setQueryParameters(uint8_t qValue);
-    void setRFParameters(uint16_t transmitPower, uint8_t demodulatorParameter);
-    
+  uint8_t uid[12] = {0};
+  String epc = "";
+  void setContinuousCarrier(bool enable);
+  void acquireTransmitPower();
+  bool begin(HardwareSerial *serial = &Serial2, int baud = 115200, uint8_t RxPin = 16, uint8_t TxPin = 17);
+  void loop();
+  void poll();
+  void setMultiplePollingMode(bool enable = true);
+  void dumpModuleInfo();
+  bool dataAvailable();
+  void setQueryParameters(uint8_t qValue);
+  void setRFParameters(uint16_t transmitPower, uint8_t demodulatorParameter);
 
-    //bool newCardPresent();
-    //bool isCardPresent();
-    void dumpUIDToSerial();
+  // bool newCardPresent();
+  // bool isCardPresent();
+  void dumpUIDToSerial();
 
-
-
- // Commands sent to the reader, and responses received back, are sent as data frames, e.g.
- // Header | Type | Command | ParamLength (2bytes) | Parameter(s) | Checksum | End
- //   AA   |  00  |   07    |      00 03           |   04 02 05   |    15    | DD
- //
- // Frames always start with the header value 0xAA
- // Type indicates a command to the reader (0x00), or a response (0x01), or notification (0x02) back from it
- // Command is the instruction to be performed, or the response from that instruction
- // ParamLength gives 2-byte (MSB then LSB) number of parameters being passed in the frame
- // Params may be zero or more
- // Checksum is the LSB of the sum of bytes from the type to the last instruction parameter (i.e. excluding Frame Header)
- // Frames always end with the tail value 0xDD
+  // Commands sent to the reader, and responses received back, are sent as data frames, e.g.
+  // Header | Type | Command | ParamLength (2bytes) | Parameter(s) | Checksum | End
+  //   AA   |  00  |   07    |      00 03           |   04 02 05   |    15    | DD
+  //
+  // Frames always start with the header value 0xAA
+  // Type indicates a command to the reader (0x00), or a response (0x01), or notification (0x02) back from it
+  // Command is the instruction to be performed, or the response from that instruction
+  // ParamLength gives 2-byte (MSB then LSB) number of parameters being passed in the frame
+  // Params may be zero or more
+  // Checksum is the LSB of the sum of bytes from the type to the last instruction parameter (i.e. excluding Frame Header)
+  // Frames always end with the tail value 0xDD
 
   // Position of elements in the frame definition, as offset from the header
-  enum R200_FrameStructure : byte {
+  enum R200_FrameStructure : byte
+  {
     R200_HeaderPos = 0x00,
     R200_TypePos = 0x01,
     R200_CommandPos = 0x02,
@@ -74,19 +73,22 @@ class R200 {
     // R200_EndPos = 0x06 + (R200_ParamLengthMSBPos << 8 + R200_ParamLengthLSBPos)
   };
 
-  enum R200_FrameControl : byte {
+  enum R200_FrameControl : byte
+  {
     R200_FrameHeader = 0xAA,
     R200_FrameEnd = 0xDD,
   };
 
-  enum R200_FrameType : byte {
+  enum R200_FrameType : byte
+  {
     FrameType_Command = 0x00,
     FrameType_Response = 0x01,
     FrameType_Notification = 0x02,
   };
 
   // 35.
-	enum R200_Command : byte {
+  enum R200_Command : byte
+  {
     CMD_GetModuleInfo = 0x03,
     CMD_SinglePollInstruction = 0x22,
     CMD_MultiplePollInstruction = 0x27,
@@ -99,7 +101,7 @@ class R200 {
     CMD_LockLabel = 0x82,
     CMD_KillTag = 0x65,
     CMD_GetQueryParameters = 0x0D,
-    CMD_SetQueryParameters= 0x0E,
+    CMD_SetQueryParameters = 0x0E,
     CMD_SetWorkArea = 0x07,
     CMD_SetWorkingChannel = 0xAB,
     CMD_GetWorkingChannel = 0xAA,
@@ -117,7 +119,8 @@ class R200 {
     CMD_ExecutionFailure = 0xFF,
   };
 
-  enum R200_ErrorCode : byte {
+  enum R200_ErrorCode : byte
+  {
     ERR_CommandError = 0x17,
     ERR_FHSSFail = 0x20,
     ERR_InventoryFail = 0x15,

@@ -4,7 +4,8 @@
 #include <Arduino.h>
 // #include <SoftwareSerial.h> // REMOVIDO: Esta linha causa o erro de compilação no ESP32.
 
-class RFIDR200 {
+class RFIDR200
+{
 public:
     // Construtor para HardwareSerial (o único que usaremos no ESP32)
     RFIDR200(HardwareSerial &serial, uint32_t baudRate);
@@ -26,7 +27,8 @@ public:
     bool setDemodulatorParameters(uint8_t mixerGain, uint8_t ifGain, uint16_t threshold);
     void lockTag(uint32_t accessPassword, uint16_t lockPayload);
     void setWorkArea(uint8_t region);
-    void getWorkArea(uint8_t *response, size_t length);
+    // void getWorkArea(uint8_t *response, size_t length);
+    void getWorkArea();
     void setWorkingChannel(uint8_t channelIndex);
     void getWorkingChannel(uint8_t *response, size_t length);
     void setAutomaticFrequencyHopping(bool enable);
@@ -36,7 +38,8 @@ public:
     bool getResponse(uint8_t *buffer, size_t length, uint32_t timeout = 1000);
     bool hasValidTag(uint8_t *response);
     int checkErrorCode(uint8_t code);
-    void parseTagResponse(uint8_t* response, uint8_t& rssi, uint8_t (&epc)[12]);
+    void parseTagResponse(uint8_t *response, uint8_t &rssi, uint8_t (&epc)[12]);
+    void getModuleInformation();
 
 private:
     // Mudado para Stream para ser mais genérico, mas HardwareSerial& também funcionaria.
@@ -49,4 +52,3 @@ private:
 };
 
 #endif // RFIDR200_H
-

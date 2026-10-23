@@ -1,13 +1,12 @@
 #include <WiFi.h>
-#include <WiFiClientSecure.h> 
-#include <PubSubClient.h>     
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include "RFIDR200.h" 
-#include <sys/time.h>             
+#include "RFIDR200.h"
+#include <sys/time.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 #include <ESPping.h>
-
 
 // ====================================================================
 // ======= HEADERS DO FREERTOS PARA ARDUINO IDE ========
@@ -36,7 +35,7 @@ Preferences preferences;
 
 SemaphoreHandle_t wifiConectadoSemaphore;
 SemaphoreHandle_t mqttConectadoSemaphore;
-QueueHandle_t rfidDataQueue; 
+QueueHandle_t rfidDataQueue;
 
 // CONFIGURAÇÕES DE REDE E MQTT (LIDAS DO NVS)
 String NVS_SSID;
@@ -49,13 +48,16 @@ String MQTT_CA_CERT_PROGMEM;
 
 // OUTRAS CONSTANTES GLOBAIS
 const int PORTA_MQTT = 8883;
-const char* CLIENT_ID = "portal_ESP_02";
-const char* TOPICO_MQTT = "/rfid/leituras";
+const char *CLIENT_ID = "portal_ESP_02";
+const char *TOPICO_MQTT = "/rfid/leituras";
 
 // DEFININDO O INTERVALO MÍNIMO ESTÁVEL DE LEITURA (200ms)
-const unsigned long T_INTERVALO_LEITURA_MS = 200; 
+const unsigned long T_INTERVALO_LEITURA_MS = 200;
 
-const char* ntpServer = "172.16.0.1";
+// const char* ntpServer = "ntp1.ufsm.br";
+const char *ntpServer = "a.ntp.br";
+
+// const char* ntpServer = "172.16.0.1";
 const long gmtOffset_sec = -3 * 3600;
 const int daylightOffset_sec = 0;
 
@@ -66,166 +68,246 @@ const int daylightOffset_sec = 0;
 
 // ======= FUNÇÃO AUXILIAR DE PUBLICAÇÃO MQTT (Otimizada) ========
 // Alterado para receber const char* para evitar criação de Strings desnecessárias na entrada
-void publicarMQTT(const char* epcData) {
-  if (!mqttClient.connected()) {
+void publicarMQTT(const char *epcData)
+{
+  if (!mqttClient.connected())
+  {
     Serial.println("PublicarMQTT: Conexão perdida. Tentando reconectar...");
-    if(!mqttClient.connect(CLIENT_ID)) {
-       return;
+    if (!mqttClient.connect(CLIENT_ID))
+    {
+      return;
     }
   }
 
   int epochValue = time(nullptr);
   Serial.println(epochValue);
-  if (mqttClient.connected()) {
-      // Separa "EPC|RSSI" em campos individuais
-      char epc[25] = {};
-      int rssiVal  = 0;
-      const char* pipe = strchr(epcData, '|');
-      if (pipe) {
-          strncpy(epc, epcData, pipe - epcData);
-          rssiVal = atoi(pipe + 1);
-      } else {
-          strncpy(epc, epcData, 24);
-      }
+  if (mqttClient.connected())
+  {
+    // Separa "EPC|RSSI" em campos individuais
+    char epc[25] = {};
+    int rssiVal = 0;
+    const char *pipe = strchr(epcData, '|');
+    if (pipe)
+    {
+      strncpy(epc, epcData, pipe - epcData);
+      rssiVal = atoi(pipe + 1);
+    }
+    else
+    {
+      strncpy(epc, epcData, 24);
+    }
 
-      JsonDocument doc;
-      doc["epc"]       = epc;
-      doc["mqttId"]    = CLIENT_ID;
-      doc["timestamp"] = epochValue;
-      doc["rssi"]      = rssiVal;
+    JsonDocument doc;
+    doc["epc"] = epc;
+    doc["mqttId"] = CLIENT_ID;
+    doc["timestamp"] = epochValue;
+    doc["rssi"] = rssiVal;
 
-      String jsonString;
-      serializeJson(doc, jsonString);
+    String jsonString;
+    serializeJson(doc, jsonString);
 
-      if (mqttClient.publish(TOPICO_MQTT, jsonString.c_str())) {
-        // Sucesso
-      } else {
-        Serial.println("Falha ao publicar via MQTT.");
-      }
+    if (mqttClient.publish(TOPICO_MQTT, jsonString.c_str()))
+    {
+      // Sucesso
+    }
+    else
+    {
+      Serial.println("Falha ao publicar via MQTT.");
+    }
   }
 }
 
 // ======= TAREFA DE INICIALIZAÇÃO E RECONEXÃO WI-FI ========
-void TaskConectarWiFi(void *pvParameters) {
+void TaskConectarWiFi(void *pvParameters)
+{
   Serial.print("Task ConectarWiFi: Iniciando conexão Wi-Fi...");
   IPAddress primaryDNS(172, 16, 0, 1);
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, primaryDNS, primaryDNS);
-  WiFi.begin(NVS_SSID.c_str(), NVS_SENHA.c_str()); 
+  WiFi.begin(NVS_SSID.c_str(), NVS_SENHA.c_str());
 
   Serial.println("Servidor DNS: ");
   Serial.println(WiFi.dnsIP());
 
-  while (WiFi.status() != WL_CONNECTED) {
-    vTaskDelay(pdMS_TO_TICKS(500));
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    vTaskDelay(pdMS_TO_TICKS(5000));
     Serial.print(".");
   }
 
   Serial.println("\nTask ConectarWiFi: Wi-Fi conectado! IP: " + WiFi.localIP().toString());
-  
+
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
 
   Serial.println("Solicitando hora ao servidor interno (172.16.0.1)...");
-  
-  if (!getLocalTime(&timeinfo, 5000)) {
+
+  if (!getLocalTime(&timeinfo, 5000))
+  {
     Serial.println("ERRO: O servidor 172.16.0.1 não respondeu ao NTP.");
-  } else {
+  }
+  else
+  {
     Serial.println(&timeinfo, "SUCESSO NTP INTERNO: %A, %B %d %Y %H:%M:%S");
   }
-
-  xSemaphoreGive(wifiConectadoSemaphore); 
+  // time_t now = time(nullptr);
+  // struct tm utc;
+  // gmtime_r(&now, &utc);
+  // Serial.printf("epoch=%ld  UTC=%02d:%02d:%02d\n",
+  //               (long)now, utc.tm_hour, utc.tm_min, utc.tm_sec);
+  xSemaphoreGive(wifiConectadoSemaphore);
   Serial.println("Task ConectarWiFi: Concluída e se auto-deletando.");
   vTaskDelete(NULL);
 }
 
 // ======= TAREFA DE CONEXÃO E RECONEXÃO MQTT ========
-void TaskConectarMQTT(void *pvParameters) {
+void TaskConectarMQTT(void *pvParameters)
+{
   Serial.println("Task ConectarMQTT: Aguardando Wi-Fi...");
-  xSemaphoreTake(wifiConectadoSemaphore, portMAX_DELAY); 
-  
-  const char* ca_cert = MQTT_CA_CERT_PROGMEM.c_str();
-  const char* client_cert = CLIENT_CERT_PROGMEM.c_str();
-  const char* client_key = CLIENT_KEY_PROGMEM.c_str();
+  xSemaphoreTake(wifiConectadoSemaphore, portMAX_DELAY);
+
+  const char *ca_cert = MQTT_CA_CERT_PROGMEM.c_str();
+  const char *client_cert = CLIENT_CERT_PROGMEM.c_str();
+  const char *client_key = CLIENT_KEY_PROGMEM.c_str();
+
+  // Serial.printf("CLIENT CERT tamanho: %d\n", CLIENT_CERT_PROGMEM.length());
+  // Serial.printf("CLIENT KEY tamanho: %d\n", CLIENT_KEY_PROGMEM.length());
+  // Serial.printf("CA tamanho: %d\n", MQTT_CA_CERT_PROGMEM.length());
+
+  // Serial.println("CLIENT CERT:");
+  // Serial.println(client_cert );
+
+  // Serial.println("CA CERT:");
+  // Serial.println(ca_cert);
 
   espClient.setCACert(ca_cert);
+  // espClient.setInsecure();
   espClient.setCertificate(client_cert);
   espClient.setPrivateKey(client_key);
-  
-  mqttClient.setServer(NVS_BROKER_MQTT.c_str(), PORTA_MQTT); 
 
-  while (true) {
-    if (!mqttClient.connected()) {
+  // if (espClient.connect("172.22.48.145", 8883))
+  // {
+  //   Serial.println("TLS + certificado cliente OK");
+  // }
+  // else
+  // {
+  //   Serial.println("Falha TLS");
+  // }
+  mqttClient.setServer(NVS_BROKER_MQTT.c_str(), PORTA_MQTT);
+
+  // char buf[256];
+  // int err = espClient.lastError(buf, sizeof(buf));
+  // Serial.printf("TLS error %d: %s\n", err, buf);
+
+  while (true)
+  {
+    if (!mqttClient.connected())
+    {
       Serial.print("Task ConectarMQTT: Conectando...");
-      String currentClientId = String(CLIENT_ID) + "_" + String(esp_random(), HEX); 
-      
-      if (mqttClient.connect(currentClientId.c_str())) {
+      String currentClientId = String(CLIENT_ID) + "_" + String(esp_random(), HEX);
+
+      if (mqttClient.connect(currentClientId.c_str()))
+      {
         Serial.println("\n[MQTT] Conectado!");
-        xSemaphoreGive(mqttConectadoSemaphore); 
-      } else {
+        xSemaphoreGive(mqttConectadoSemaphore);
+      }
+      else
+      {
         Serial.print(" Falha rc=");
         Serial.print(mqttClient.state());
-        vTaskDelay(pdMS_TO_TICKS(5000)); 
+        vTaskDelay(pdMS_TO_TICKS(5000));
       }
-    } else {
-      vTaskDelay(pdMS_TO_TICKS(1000)); 
+    }
+    else
+    {
+      vTaskDelay(pdMS_TO_TICKS(1000));
     }
   }
 }
 
 // ======= TAREFA EM LOOP: PUBLICAR DADOS MQTT ========
-void TaskPublicarMQTT(void *pvParameters) {
-    xSemaphoreTake(mqttConectadoSemaphore, portMAX_DELAY); 
+void TaskPublicarMQTT(void *pvParameters)
+{
+  xSemaphoreTake(mqttConectadoSemaphore, portMAX_DELAY);
 
-    char epc_recebido[30];
+  char epc_recebido[30];
 
-    while (true) {
-        if (mqttClient.connected()) {
-            mqttClient.loop(); 
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(500));
-            continue; 
-        }
-
-        if (xQueueReceive(rfidDataQueue, (void*)&epc_recebido, pdMS_TO_TICKS(100))) { 
-            publicarMQTT(epc_recebido); 
-        }
+  while (true)
+  {
+    if (mqttClient.connected())
+    {
+      mqttClient.loop();
     }
+    else
+    {
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+
+    if (xQueueReceive(rfidDataQueue, (void *)&epc_recebido, pdMS_TO_TICKS(100)))
+    {
+      publicarMQTT(epc_recebido);
+    }
+  }
 }
 
 // ======= SETUP ========
-void setup() {
+void setup()
+{
   Serial.begin(115200);
 
   esp_task_wdt_init(WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 
-  
   Serial.println("Iniciando: " __FILE__ " " __DATE__);
 
-  NVS_SSID = "INFRA_CTISM";
-  NVS_SENHA = "teste001";
-  NVS_BROKER_MQTT = "mosquittoserver.controle.ufsm";
+  NVS_SSID = "nersec";
+  NVS_SENHA = "N3R5eC5c2025";
+
+  // NVS_SSID = "INFRA_CTISM";
+  // NVS_SENHA = "teste001";
+
+  NVS_BROKER_MQTT = "172.22.48.145";
+  //: NVS_BROKER_MQTT = "mosquittoserver.controle.ufsm";
 
   preferences.begin("CERTS", true);
   CLIENT_CERT_PROGMEM = preferences.getString("tarnodePUB");
   CLIENT_KEY_PROGMEM = preferences.getString("tarnodePRIV");
   MQTT_CA_CERT_PROGMEM = preferences.getString("tarnodeCHAIN");
-  preferences.end(); 
+  preferences.end();
 
+  // Serial.printf("client.crt: %d bytes\n", CLIENT_CERT_PROGMEM.length());
+  // Serial.printf("client.crt: %d bytes\n", CLIENT_CERT_PROGMEM.length());
+  // Serial.printf("client.key: %d bytes\n", CLIENT_KEY_PROGMEM.length());
+  // Serial.printf("ca.crt: %d bytes\n", MQTT_CA_CERT_PROGMEM.length());
+
+  // Serial.println(CLIENT_CERT_PROGMEM.startsWith("-----BEGIN CERTIFICATE-----")
+  //                    ? "CLIENT CERT OK"
+  //                    : "CLIENT CERT INVALID");
+
+  // Serial.println(CLIENT_KEY_PROGMEM.startsWith("-----BEGIN")
+  //                    ? "CLIENT KEY OK"
+  //                    : "CLIENT KEY INVALID");
+
+  // Serial.println(MQTT_CA_CERT_PROGMEM.startsWith("-----BEGIN CERTIFICATE-----")
+  //                    ? "CA CERT OK"
+  //                    : "CA CERT INVALID");
   MySerial.begin(115200, SERIAL_8N1, 16, 17);
 
   wifiConectadoSemaphore = xSemaphoreCreateBinary();
   mqttConectadoSemaphore = xSemaphoreCreateBinary();
-  
-  rfidDataQueue = xQueueCreate(50, sizeof(char[30])); 
 
-  if (rfidReader.setTransmitPower(2500)) {
-      Serial.println("Potência definida com SUCESSO.");
+  rfidDataQueue = xQueueCreate(50, sizeof(char[30]));
+
+  if (rfidReader.setTransmitPower(2500))
+  {
+    Serial.println("Potência definida com SUCESSO.");
   }
-  
+
   rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
   rfidReader.setQueryParameters(1, 1, 1, 0);
-  rfidReader.stopMultiplePolling(); 
+  rfidReader.stopMultiplePolling();
+
+  rfidReader.getWorkArea();
 
   xTaskCreatePinnedToCore(TaskConectarWiFi, "Conectar-WiFi", 4096, NULL, 5, NULL, 0);
   xTaskCreatePinnedToCore(TaskConectarMQTT, "Conectar-MQTT", 12288, NULL, 4, NULL, 1);
@@ -233,107 +315,127 @@ void setup() {
 }
 
 // ======= LOOP PRINCIPAL DO ARDUINO (LEITURA) ========
-void loop() {
+void loop()
+{
 
   static unsigned long ultimoPoll = 0;
   static uint8_t responseBuffer[256];
   static const uint32_t GET_RESPONSE_TIMEOUT_MS = 1000;
   static unsigned long tempoDesconectado = 0;
 
-  if (mqttClient.connected()) {
-      tempoDesconectado = 0; 
-      esp_task_wdt_reset(); 
-  } else {
+  if (mqttClient.connected())
+  {
+    tempoDesconectado = 0;
+    esp_task_wdt_reset();
+  }
+  else
+  {
 
-      if (tempoDesconectado == 0) tempoDesconectado = millis();
-      
-      if (millis() - tempoDesconectado > 120000) {
-          Serial.println("MUITO TEMPO SEM MQTT. REINICIANDO...");
-          ESP.restart();
-      }
+    if (tempoDesconectado == 0)
+      tempoDesconectado = millis();
+
+    if (millis() - tempoDesconectado > 120000)
+    {
+      Serial.println("MUITO TEMPO SEM MQTT. REINICIANDO...");
+      ESP.restart();
+    }
   }
 
-  if (millis() - ultimoPoll >= T_INTERVALO_LEITURA_MS) {
-      
-      MySerial.flush(); 
+  if (millis() - ultimoPoll >= T_INTERVALO_LEITURA_MS)
+  {
 
-      rfidReader.initiateSinglePolling(); 
-      ultimoPoll = millis();
-      
-      if (rfidReader.getResponse(responseBuffer, 256, GET_RESPONSE_TIMEOUT_MS)) {
-          
-          if(rfidReader.hasValidTag(responseBuffer)) {
-              uint8_t rssi;
-              uint8_t epc[12];
-              rfidReader.parseTagResponse(responseBuffer, rssi, epc);
+    MySerial.flush();
 
-              char epc_hex_str[30];
+    rfidReader.initiateSinglePolling();
+    ultimoPoll = millis();
 
-              snprintf(epc_hex_str, 25,
-                       "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
-                       epc[0], epc[1], epc[2], epc[3], epc[4], epc[5],
-                       epc[6], epc[7], epc[8], epc[9], epc[10], epc[11]
-                      );
+    if (rfidReader.getResponse(responseBuffer, 256, GET_RESPONSE_TIMEOUT_MS))
+    {
 
-              if (strcmp(epc_hex_str, "000000000000000000000000") != 0) {
+      if (rfidReader.hasValidTag(responseBuffer))
+      {
+        uint8_t rssi;
+        uint8_t epc[12];
+        rfidReader.parseTagResponse(responseBuffer, rssi, epc);
 
-                  Serial.printf("TAG: %s | RSSI: %d\n", epc_hex_str, rssi);
+        char epc_hex_str[30];
 
-                  // Deduplicação: descarta mesma tag vista há menos de 5s
-                  static char          dedupEpc[8][25] = {};
-                  static unsigned long dedupMs[8]      = {0};
+        snprintf(epc_hex_str, 25,
+                 "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
+                 epc[0], epc[1], epc[2], epc[3], epc[4], epc[5],
+                 epc[6], epc[7], epc[8], epc[9], epc[10], epc[11]);
 
-                  bool shouldPublish = true;
-                  int  matchSlot  = -1;
-                  int  freeSlot   = -1;
-                  int  oldestSlot = 0;
+        if (strcmp(epc_hex_str, "000000000000000000000000") != 0)
+        {
 
-                  for (int i = 0; i < 8; i++) {
-                      if (dedupEpc[i][0] != '\0' && strcmp(dedupEpc[i], epc_hex_str) == 0) {
-                          matchSlot = i;
-                          if (millis() - dedupMs[i] < 5000UL) {
-                              shouldPublish = false;
-                          } else {
-                              dedupMs[i] = millis();
-                          }
-                          break;
-                      }
-                      if (dedupEpc[i][0] == '\0' && freeSlot < 0) freeSlot = i;
-                      if (dedupMs[i] < dedupMs[oldestSlot]) oldestSlot = i;
-                  }
+          Serial.printf("TAG: %s | RSSI: %d\n", epc_hex_str, rssi);
 
-                  if (shouldPublish) {
-                      if (matchSlot < 0) {
-                          int slot = (freeSlot >= 0) ? freeSlot : oldestSlot;
-                          strncpy(dedupEpc[slot], epc_hex_str, 24);
-                          dedupEpc[slot][24] = '\0';
-                          dedupMs[slot] = millis();
-                      }
+          // Deduplicação: descarta mesma tag vista há menos de 5s
+          static char dedupEpc[8][25] = {};
+          static unsigned long dedupMs[8] = {0};
 
-                      // Anexa RSSI ao final: "XXXXXXXXXXXXXXXXXXXXXXXX|rrr"
-                      snprintf(epc_hex_str + 24, 6, "|%d", rssi);
+          bool shouldPublish = true;
+          int matchSlot = -1;
+          int freeSlot = -1;
+          int oldestSlot = 0;
 
-                      if (xQueueSend(rfidDataQueue, (void*)&epc_hex_str, pdMS_TO_TICKS(10)) != pdPASS) {
-                          Serial.println("Fila Cheia!");
-                      }
-                  }
+          for (int i = 0; i < 8; i++)
+          {
+            if (dedupEpc[i][0] != '\0' && strcmp(dedupEpc[i], epc_hex_str) == 0)
+            {
+              matchSlot = i;
+              if (millis() - dedupMs[i] < 5000UL)
+              {
+                shouldPublish = false;
               }
+              else
+              {
+                dedupMs[i] = millis();
+              }
+              break;
+            }
+            if (dedupEpc[i][0] == '\0' && freeSlot < 0)
+              freeSlot = i;
+            if (dedupMs[i] < dedupMs[oldestSlot])
+              oldestSlot = i;
           }
+
+          if (shouldPublish)
+          {
+            if (matchSlot < 0)
+            {
+              int slot = (freeSlot >= 0) ? freeSlot : oldestSlot;
+              strncpy(dedupEpc[slot], epc_hex_str, 24);
+              dedupEpc[slot][24] = '\0';
+              dedupMs[slot] = millis();
+            }
+
+            // Anexa RSSI ao final: "XXXXXXXXXXXXXXXXXXXXXXXX|rrr"
+            snprintf(epc_hex_str + 24, 6, "|%d", rssi);
+
+            if (xQueueSend(rfidDataQueue, (void *)&epc_hex_str, pdMS_TO_TICKS(10)) != pdPASS)
+            {
+              Serial.println("Fila Cheia!");
+            }
+          }
+        }
       }
+    }
   }
-  
-  vTaskDelay(pdMS_TO_TICKS(1)); 
+
+  vTaskDelay(pdMS_TO_TICKS(1));
 }
 
 // ======= FUNÇÃO PARA GRAVAR DADOS NO NVS (Executar apenas se necessário) ========
-void setupNVS() {
-    preferences.begin("mqtt_config", false); // false = modo leitura/escrita
-    
-    // Grava as chaves apenas se você chamar esta função no setup()
-    preferences.putString("ssid", "INFRA_CTISM");          
-    preferences.putString("senha", "teste001");      
-    preferences.putString("broker_mqtt", "mosquittoserver.controle.ufsm"); 
+void setupNVS()
+{
+  preferences.begin("mqtt_config", false); // false = modo leitura/escrita
 
-    preferences.end(); 
-    Serial.println("Configurações de rede e broker gravadas no NVS.");
+  // Grava as chaves apenas se você chamar esta função no setup()
+  preferences.putString("ssid", "INFRA_CTISM");
+  preferences.putString("senha", "teste001");
+  preferences.putString("broker_mqtt", "mosquittoserver.controle.ufsm");
+
+  preferences.end();
+  Serial.println("Configurações de rede e broker gravadas no NVS.");
 }
