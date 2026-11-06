@@ -267,7 +267,7 @@ static void medir(uint32_t seg) {
         while (MySerial.available()) MySerial.read();
         rfidReader.initiateSinglePolling();
         tent++;
-        if (!rfidReader.getResponse(r, sizeof(r), 150)) continue;
+        if (!rfidReader.getResponse(r, sizeof(r), 500)) continue;
         if (r[2] != 0x22) continue;           // 0xFF = sem etiqueta
         char e[25];
         snprintf(e, sizeof(e), "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
