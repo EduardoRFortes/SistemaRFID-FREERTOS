@@ -192,6 +192,138 @@ void TaskPublicarMQTT(void *pvParameters) {
     }
 }
 
+
+// ======= MODO BANCADA (depuração do R200 pela serial USB) ========
+// Comandos (terminar com Enter):
+//   g          lê a potência atual do módulo (0xB7)
+//   p<valor>   define a potência em centi-dBm e lê de volta (ex.: p2000 = 20 dBm)
+//   m<seg>     mede por <seg> segundos: tentativas, leituras, taxa e RSSI por EPC
+//   d<n>       n pollings únicos com o quadro cru da resposta
+//   l          liga/desliga a leitura contínua normal do loop
+// Sem NVS/certificados o MQTT nunca conecta e o loop reiniciaria a cada 2 min;
+// com BANCADA=1 esse reinício fica desligado. REMOVER na implantação.
+#define BANCADA 1
+
+static bool leituraContinua = true;
+
+static uint8_t checksumBancada(const uint8_t* c, size_t n) {
+    uint8_t s = 0;
+    for (size_t i = 1; i < n; i++) s += c[i];
+    return s;
+}
+
+static void imprimeHex(const char* rotulo, const uint8_t* b, size_t n) {
+    Serial.printf("%s", rotulo);
+    for (size_t i = 0; i < n; i++) Serial.printf("%02X ", b[i]);
+    Serial.println();
+}
+
+// Envia um comando e imprime o quadro cru da resposta. Devolve true se chegou quadro.
+static bool comandoBancada(uint8_t cmd, const uint8_t* payload, uint16_t plen, uint8_t* resp, size_t rlen) {
+    uint8_t f[32];
+    f[0] = 0xAA; f[1] = 0x00; f[2] = cmd; f[3] = plen >> 8; f[4] = plen & 0xFF;
+    for (uint16_t i = 0; i < plen; i++) f[5 + i] = payload[i];
+    f[5 + plen] = checksumBancada(f, 5 + plen);
+    f[6 + plen] = 0xDD;
+    while (MySerial.available()) MySerial.read();
+    MySerial.write(f, 7 + plen);
+    imprimeHex("  >> ", f, 7 + plen);
+    memset(resp, 0, rlen);
+    bool ok = rfidReader.getResponse(resp, rlen, 500);
+    if (!ok) { Serial.println("  << TIMEOUT (nenhum quadro do R200)"); return false; }
+    size_t n = 7 + ((resp[3] << 8) | resp[4]);
+    if (n > rlen) n = rlen;
+    imprimeHex("  << ", resp, n);
+    return true;
+}
+
+static void lerPotencia() {
+    uint8_t r[32];
+    if (comandoBancada(0xB7, nullptr, 0, r, sizeof(r)) && r[2] == 0xB7) {
+        uint16_t p = (r[5] << 8) | r[6];
+        Serial.printf("POTENCIA lida: %u centi-dBm (%.2f dBm)\n", p, p / 100.0);
+    }
+}
+
+static void definirPotencia(uint16_t p) {
+    uint8_t pl[2] = { (uint8_t)(p >> 8), (uint8_t)(p & 0xFF) };
+    uint8_t r[32];
+    Serial.printf("Definindo potencia %u centi-dBm\n", p);
+    if (comandoBancada(0xB6, pl, 2, r, sizeof(r))) {
+        Serial.printf("  status=0x%02X (0x00 = aceito)\n", r[5]);
+    }
+    lerPotencia();
+}
+
+static void medir(uint32_t seg) {
+    struct Est { char epc[25]; uint32_t n; uint32_t soma; uint8_t mn, mx; };
+    Est est[8]; int nEst = 0;
+    uint32_t tent = 0, hits = 0;
+    uint8_t r[64];
+    uint32_t fim = millis() + seg * 1000UL;
+    Serial.printf("Medindo por %us...\n", (unsigned)seg);
+    while ((int32_t)(millis() - fim) < 0) {
+        esp_task_wdt_reset();
+        while (MySerial.available()) MySerial.read();
+        rfidReader.initiateSinglePolling();
+        tent++;
+        if (!rfidReader.getResponse(r, sizeof(r), 150)) continue;
+        if (r[2] != 0x22) continue;           // 0xFF = sem etiqueta
+        char e[25];
+        snprintf(e, sizeof(e), "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
+                 r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17], r[18], r[19]);
+        hits++;
+        int k = -1;
+        for (int i = 0; i < nEst; i++) if (!strcmp(est[i].epc, e)) { k = i; break; }
+        if (k < 0 && nEst < 8) { k = nEst++; strcpy(est[k].epc, e); est[k].n = 0; est[k].soma = 0; est[k].mn = 255; est[k].mx = 0; }
+        if (k >= 0) { est[k].n++; est[k].soma += r[5]; if (r[5] < est[k].mn) est[k].mn = r[5]; if (r[5] > est[k].mx) est[k].mx = r[5]; }
+    }
+    Serial.printf("RESULTADO: tentativas=%u leituras=%u taxa=%.1f%% (%.1f leituras/s)\n",
+                  tent, hits, tent ? 100.0 * hits / tent : 0.0, hits / (double)seg);
+    for (int i = 0; i < nEst; i++)
+        Serial.printf("  EPC %s  n=%u  RSSI medio=%.1f min=%u max=%u\n",
+                      est[i].epc, est[i].n, est[i].soma / (double)est[i].n, est[i].mn, est[i].mx);
+    if (!nEst) Serial.println("  nenhuma etiqueta lida");
+}
+
+// Um polling único com o quadro cru da resposta (diagnóstico)
+static void pollingCru(int vezes) {
+    uint8_t r[64];
+    for (int i = 0; i < vezes; i++) {
+        esp_task_wdt_reset();
+        while (MySerial.available()) MySerial.read();
+        uint32_t t0 = millis();
+        rfidReader.initiateSinglePolling();
+        memset(r, 0, sizeof(r));
+        bool ok = rfidReader.getResponse(r, sizeof(r), 1000);
+        uint32_t dt = millis() - t0;
+        if (!ok) { Serial.printf("  poll %d: TIMEOUT (%ums)\n", i, (unsigned)dt); continue; }
+        size_t n = 7 + ((r[3] << 8) | r[4]); if (n > sizeof(r)) n = sizeof(r);
+        Serial.printf("  poll %d (%ums): ", i, (unsigned)dt);
+        imprimeHex("", r, n);
+    }
+}
+
+static void tratarSerialBancada() {
+    static String linha;
+    while (Serial.available()) {
+        char c = Serial.read();
+        if (c == '\r') continue;
+        if (c != '\n') { linha += c; continue; }
+        linha.trim();
+        if (linha.length()) {
+            char k = linha[0];
+            if (k == 'g') lerPotencia();
+            else if (k == 'p') definirPotencia((uint16_t)linha.substring(1).toInt());
+            else if (k == 'm') medir(max(1L, linha.substring(1).toInt()));
+            else if (k == 'd') pollingCru(max(1L, linha.substring(1).toInt()));
+            else if (k == 'l') { leituraContinua = !leituraContinua; Serial.printf("leitura continua: %s\n", leituraContinua ? "ligada" : "desligada"); }
+            else Serial.println("comandos: g | p<centi-dBm> | m<seg> | d<n> | l");
+        }
+        linha = "";
+    }
+}
+
 // ======= SETUP ========
 void setup() {
   Serial.begin(115200);
@@ -219,9 +351,8 @@ void setup() {
   
   rfidDataQueue = xQueueCreate(50, sizeof(char[30])); 
 
-  if (rfidReader.setTransmitPower(2500)) {
-      Serial.println("Potência definida com SUCESSO.");
-  }
+  // Bancada: mostra o quadro cru em vez de falhar em silêncio
+  definirPotencia(1000);  // bancada: sobe baixo para não derrubar o USB; subir com o comando p
   
   rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
   rfidReader.setQueryParameters(1, 1, 1, 0);
@@ -247,13 +378,15 @@ void loop() {
 
       if (tempoDesconectado == 0) tempoDesconectado = millis();
       
-      if (millis() - tempoDesconectado > 120000) {
+      if (!BANCADA && millis() - tempoDesconectado > 120000) {
           Serial.println("MUITO TEMPO SEM MQTT. REINICIANDO...");
           ESP.restart();
       }
   }
 
-  if (millis() - ultimoPoll >= T_INTERVALO_LEITURA_MS) {
+  tratarSerialBancada();
+
+  if (leituraContinua && millis() - ultimoPoll >= T_INTERVALO_LEITURA_MS) {
       
       MySerial.flush(); 
 
