@@ -316,6 +316,17 @@ bool RFIDR200::setDemodulatorParameters(uint8_t mixerGain, uint8_t ifGain, uint1
         // Na nossa biblioteca, isto corresponde a verificar o comando (posição 2) e o status (posição 5)
         if (responseBuffer[2] == 0xF0 && responseBuffer[5] == 0x00)
         {
+            Serial.print("Threshodls R: ");
+            for (size_t i = 0; i < sizeof(responseBuffer); i++)
+            {
+                if (command[i] < 0x10)
+                    Serial.print('0');
+                Serial.print(responseBuffer[i], HEX);
+                Serial.print(' ');
+            }
+
+            Serial.println();
+
             return true; // Sucesso!
         }
     }
