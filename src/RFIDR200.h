@@ -1,6 +1,6 @@
 #ifndef RFIDR200_H
 #define RFIDR200_H
-
+#include <PubSubClient.h>
 #include <Arduino.h>
 // #include <SoftwareSerial.h> // REMOVIDO: Esta linha causa o erro de compilação no ESP32.
 
@@ -40,6 +40,8 @@ public:
     int checkErrorCode(uint8_t code);
     void parseTagResponse(uint8_t *response, uint8_t &rssi, uint8_t (&epc)[12]);
     void getModuleInformation();
+    void processMqttCommand(PubSubClient &mqttClient, const char *responseTopic, uint8_t *command, size_t length);
+    void sendC(uint8_t *command, size_t length);
 
 private:
     // Mudado para Stream para ser mais genérico, mas HardwareSerial& também funcionaria.

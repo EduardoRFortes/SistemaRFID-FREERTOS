@@ -298,6 +298,17 @@ bool RFIDR200::setDemodulatorParameters(uint8_t mixerGain, uint8_t ifGain, uint1
         serial.read();
     sendCommand(command, sizeof(command));
 
+    Serial.print("Threshodls: ");
+    for (size_t i = 0; i < sizeof(command); i++)
+    {
+        if (command[i] < 0x10)
+            Serial.print('0');
+        Serial.print(command[i], HEX);
+        Serial.print(' ');
+    }
+
+    Serial.println();
+
     uint8_t responseBuffer[10];
     if (getResponse(responseBuffer, sizeof(responseBuffer)))
     {
@@ -336,6 +347,15 @@ void RFIDR200::parseTagResponse(uint8_t *response, uint8_t &rssi, uint8_t (&epc)
 }
 
 void RFIDR200::sendCommand(uint8_t *command, size_t length)
+{
+    while (serial.available() > 0)
+    {
+        serial.read();
+    }
+    serial.write(command, length);
+}
+
+void RFIDR200::sendC(uint8_t *command, size_t length)
 {
     while (serial.available() > 0)
     {
@@ -399,6 +419,38 @@ void RFIDR200::getModuleInformation()
         Serial.println();
     }
 };
+
+void RFIDR200::processMqttCommand(PubSubClient &mqttClient,
+                                  const char *responseTopic,
+                                  uint8_t *command,
+                                  size_t length)
+{
+    // 1. Limpa a UART e envia o comando usando sua função nativa
+    sendCommand(command, length);
+
+    // 2. Buffer para receber a resposta
+    uint8_t responseBuffer[256];
+    uint32_t timeout_ms = 500;
+
+    // 3. Aguarda e valida a resposta do R200
+    if (getResponse(responseBuffer, sizeof(responseBuffer), timeout_ms))
+    {
+        // Calcula o tamanho exato do frame: Header + Type + Command + PL(2) + Parameter + Checksum + End
+        size_t payloadLength = (static_cast<size_t>(responseBuffer[3]) << 8) |
+                               static_cast<size_t>(responseBuffer[4]);
+
+        size_t frameLength = 5 + payloadLength + 2;
+
+        // 4. Publica o frame binário de volta usando a biblioteca PubSubClient
+        mqttClient.publish(responseTopic, responseBuffer, frameLength);
+    }
+    else
+    {
+        // Envia mensagem de erro em JSON caso o frame falhe ou o módulo não responda
+        const char *errorMsg = "{\"error\": \"r200_timeout_or_invalid\"}";
+        mqttClient.publish(responseTopic, (const uint8_t *)errorMsg, strlen(errorMsg));
+    }
+}
 
 uint8_t RFIDR200::calculateChecksum(uint8_t *command, size_t length)
 {

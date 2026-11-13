@@ -24,7 +24,7 @@ void TaskPublicarMQTT(void *pvParameters);
 
 // ======= DECLARAÇÕES DE OBJETOS E VARIÁVEIS GLOBAIS =================
 
-WiFiClientSecure espClient;
+WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
 // OBJETOS DA BIBLIOTECA ROBUSTA (RFIDR200)
@@ -36,7 +36,7 @@ Preferences preferences;
 SemaphoreHandle_t wifiConectadoSemaphore;
 SemaphoreHandle_t mqttConectadoSemaphore;
 QueueHandle_t rfidDataQueue;
-
+QueueHandle_t mqttCommandQueue;
 // CONFIGURAÇÕES DE REDE E MQTT (LIDAS DO NVS)
 String NVS_SSID;
 String NVS_SENHA;
@@ -47,15 +47,15 @@ String CLIENT_KEY_PROGMEM;
 String MQTT_CA_CERT_PROGMEM;
 
 // OUTRAS CONSTANTES GLOBAIS
-const int PORTA_MQTT = 8883;
+const int PORTA_MQTT = 1883;
 const char *CLIENT_ID = "portal_ESP_02";
 const char *TOPICO_MQTT = "/rfid/leituras";
 
 // DEFININDO O INTERVALO MÍNIMO ESTÁVEL DE LEITURA (200ms)
 const unsigned long T_INTERVALO_LEITURA_MS = 200;
 
-// const char* ntpServer = "ntp1.ufsm.br";
-const char *ntpServer = "a.ntp.br";
+const char *ntpServer = "ntp1.ufsm.br";
+// const char *ntpServer = "a.ntp.br";
 
 // const char* ntpServer = "172.16.0.1";
 const long gmtOffset_sec = -3 * 3600;
@@ -63,6 +63,12 @@ const int daylightOffset_sec = 0;
 
 // Configuração do Watchdog (20 segundos)
 #define WDT_TIMEOUT 20
+#define led 2
+typedef struct
+{
+  uint8_t payload[256];
+  size_t length;
+} MqttCommandMsg_t;
 
 // ====================================================================
 
@@ -117,6 +123,9 @@ void publicarMQTT(const char *epcData)
   }
 }
 
+void TaskReceberComando()
+{
+}
 // ======= TAREFA DE INICIALIZAÇÃO E RECONEXÃO WI-FI ========
 void TaskConectarWiFi(void *pvParameters)
 {
@@ -179,10 +188,10 @@ void TaskConectarMQTT(void *pvParameters)
   // Serial.println("CA CERT:");
   // Serial.println(ca_cert);
 
-  espClient.setCACert(ca_cert);
+  // espClient.setCACert(ca_cert);
   // espClient.setInsecure();
-  espClient.setCertificate(client_cert);
-  espClient.setPrivateKey(client_key);
+  // espClient.setCertificate(client_cert);
+  // espClient.setPrivateKey(client_key);
 
   // if (espClient.connect("172.22.48.145", 8883))
   // {
@@ -207,7 +216,8 @@ void TaskConectarMQTT(void *pvParameters)
 
       if (mqttClient.connect(currentClientId.c_str()))
       {
-        Serial.println("\n[MQTT] Conectado!");
+        // Serial.println("\n[MQTT] Conectado!");
+        mqttClient.subscribe("/rfid/comandos");
         xSemaphoreGive(mqttConectadoSemaphore);
       }
       else
@@ -222,6 +232,109 @@ void TaskConectarMQTT(void *pvParameters)
       vTaskDelay(pdMS_TO_TICKS(1000));
     }
   }
+}
+
+void mqttCallback(char *topic, byte *payload, unsigned int length)
+{
+  Serial.print("\n>>> COMANDO RECEBIDO NO TOPICO ");
+  Serial.print(topic);
+  Serial.print(": ");
+  for (unsigned int i = 0; i < length; i++)
+  {
+    Serial.printf("%02X ", payload[i]); // Imprime cada byte em Hexadecimal
+  }
+  Serial.println();
+  // Ignora se o comando for maior que nosso buffer
+  if (length > sizeof(MqttCommandMsg_t::payload))
+  {
+    Serial.println("Comando MQTT muito grande!");
+    return;
+  }
+
+  MqttCommandMsg_t newCmd;
+  memcpy(newCmd.payload, payload, length);
+  newCmd.length = length;
+
+  // Envia o comando para a fila imediatamente (sem bloquear)
+  if (xQueueSend(mqttCommandQueue, &newCmd, 0) != pdPASS)
+  {
+    Serial.println("Fila de comandos MQTT cheia!");
+  }
+}
+
+void mqttCommandTask(void *pvParameters)
+{
+  MqttCommandMsg_t incomingCmd;
+  const char *responseTopic = "rfid/respostas"; // Ajuste para o seu tópico
+
+  while (1)
+  {
+    // Trava a Task aqui até que um comando chegue na fila (portMAX_DELAY)
+    if (xQueueReceive(mqttCommandQueue, &incomingCmd, portMAX_DELAY) == pdTRUE)
+    {
+      // Quando recebe, chama a função que você já criou para falar com o R200
+      // (Supondo que seu objeto R200 chame 'rfid' e o client 'mqttClient')
+      Serial.printf("Tamanho recebido na Task: %d\n", incomingCmd.length);
+      rfidReader.processMqttCommand(mqttClient,
+                                    responseTopic,
+                                    incomingCmd.payload,
+                                    incomingCmd.length);
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+void configurarR200Padrao(RFIDR200 &rfidSerial)
+{
+  Serial.println("\n--- Iniciando Configuração do R200 via Hardcode ---");
+
+  // 1. Comando Stop Polling (0x28)
+  uint8_t cmdStop[] = {0xAA, 0x00, 0x28, 0x00, 0x00, 0x28, 0xDD};
+  // 2. Comando Set Work Area (0x07) - Região US/BR (0x02)
+  uint8_t cmdRegion[] = {0xAA, 0x00, 0x07, 0x00, 0x01, 0x02, 0x0A, 0xDD};
+  // 3. Comando Set Transmit Power (0xB6) - 26 dBm (0x0A28)
+  uint8_t cmdPower[] = {0xAA, 0x00, 0xB6, 0x00, 0x02, 0x0A, 0x28, 0xEA, 0xDD};
+
+  // uint8_t cmdDemodulatorMax[] = {0xAA, 0x00, 0x11, 0x00, 0x04, 0x03, 0x06, 0x00, 0xA0, 0xBE, 0xDD};
+  // uint8_t cmdDemodulatorMax[] = {0xAA, 0x00, 0x11, 0x00, 0x04, 0x03, 0x06, 0x00, 0xA0, 0xBE, 0xDD};
+
+  // Função lambda corrigida usando as validações nativas da classe RFIDR200
+  auto enviarEValidar = [&](uint8_t *cmd, size_t len, const char *nome)
+  {
+    rfidSerial.sendC(cmd, len); // Envia o comando para a UART
+
+    uint8_t resp[30];
+
+    // A getResponse já trava a task, aguarda a resposta e valida o Checksum/0xDD
+    if (rfidSerial.getResponse(resp, sizeof(resp), 500))
+    {
+      // Calcula o tamanho real do frame recebido para imprimir corretamente
+      size_t frameLength = 5 + (static_cast<size_t>(resp[3]) << 8 | static_cast<size_t>(resp[4])) + 2;
+
+      Serial.printf("[%s] OK: ", nome);
+      for (size_t j = 0; j < frameLength; j++)
+      {
+        Serial.printf("%02X ", resp[j]);
+      }
+      Serial.println();
+      return true;
+    }
+
+    Serial.printf("[%s] FALHA OU TIMEOUT\n", nome);
+    return false;
+  };
+
+  enviarEValidar(cmdStop, sizeof(cmdStop), "Stop Polling");
+  vTaskDelay(pdMS_TO_TICKS(100));
+
+  enviarEValidar(cmdRegion, sizeof(cmdRegion), "Set Region (US/BR)");
+  vTaskDelay(pdMS_TO_TICKS(100));
+
+  // enviarEValidar(cmdDemodulatorMax, sizeof(cmdDemodulatorMax), "Set Threshold: ");
+  vTaskDelay(pdMS_TO_TICKS(100));
+
+  // enviarEValidar(cmdPower, sizeof(cmdPower), "Set Power (26 dBm)");
+  Serial.println("--- Configuração do R200 Concluída ---\n");
 }
 
 // ======= TAREFA EM LOOP: PUBLICAR DADOS MQTT ========
@@ -250,11 +363,15 @@ void TaskPublicarMQTT(void *pvParameters)
   }
 }
 
+void config()
+{
+}
+
 // ======= SETUP ========
 void setup()
 {
   Serial.begin(115200);
-
+  pinMode(led, OUTPUT);
   esp_task_wdt_init(WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 
@@ -297,21 +414,37 @@ void setup()
   mqttConectadoSemaphore = xSemaphoreCreateBinary();
 
   rfidDataQueue = xQueueCreate(50, sizeof(char[30]));
+  // mqttCommandQueue = xQueueCreate(10, sizeof(MqttCommandMsg_t)); // <-- INICIALIZA NOVA FILA
 
-  if (rfidReader.setTransmitPower(2500))
+  if (rfidReader.setTransmitPower(2600))
   {
     Serial.println("Potência definida com SUCESSO.");
   }
 
-  rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
+  //   0x0080 (mais sensível, muito ruído)
+  // 0x00A0
+  // 0x00F0
+  // 0x0120
+  // 0x0150
+  // 0x0180
+  // 0x01B0 (padrão do manual)
+  // 0x01E0
+  // 0x0210 (menos sensível, mais estável)
+
+  // rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
+  // rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
+  rfidReader.setDemodulatorParameters(0x03, 0x06, 0x0150);
   rfidReader.setQueryParameters(1, 1, 1, 0);
   rfidReader.stopMultiplePolling();
 
   rfidReader.getWorkArea();
+  configurarR200Padrao(rfidReader);
+  // mqttClient.setCallback(mqttCallback);
 
+  // xTaskCreatePinnedToCore(mqttCommandTask, "mqtt_cmd_task", 4096, NULL, 5, NULL, 1);
   xTaskCreatePinnedToCore(TaskConectarWiFi, "Conectar-WiFi", 4096, NULL, 5, NULL, 0);
-  xTaskCreatePinnedToCore(TaskConectarMQTT, "Conectar-MQTT", 12288, NULL, 4, NULL, 1);
-  xTaskCreatePinnedToCore(TaskPublicarMQTT, "Publicar-MQTT", 8192, NULL, 5, NULL, 0);
+  xTaskCreatePinnedToCore(TaskConectarMQTT, "Conectar-MQTT", 12288, NULL, 5, NULL, 0);
+  xTaskCreatePinnedToCore(TaskPublicarMQTT, "Publicar-MQTT", 8192, NULL, 4, NULL, 0);
 }
 
 // ======= LOOP PRINCIPAL DO ARDUINO (LEITURA) ========
@@ -341,6 +474,7 @@ void loop()
     }
   }
 
+  // if (false)
   if (millis() - ultimoPoll >= T_INTERVALO_LEITURA_MS)
   {
 
@@ -369,7 +503,7 @@ void loop()
         {
 
           Serial.printf("TAG: %s | RSSI: %d\n", epc_hex_str, rssi);
-
+          digitalWrite(led, !digitalRead(led));
           // Deduplicação: descarta mesma tag vista há menos de 5s
           static char dedupEpc[8][25] = {};
           static unsigned long dedupMs[8] = {0};
@@ -423,7 +557,7 @@ void loop()
     }
   }
 
-  vTaskDelay(pdMS_TO_TICKS(1));
+  vTaskDelay(pdMS_TO_TICKS(10));
 }
 
 // ======= FUNÇÃO PARA GRAVAR DADOS NO NVS (Executar apenas se necessário) ========
