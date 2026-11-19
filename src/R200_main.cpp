@@ -441,6 +441,10 @@ void setup()
   configurarR200Padrao(rfidReader);
   // mqttClient.setCallback(mqttCallback);
 
+  vTaskDelay(pdMS_TO_TICKS(200));
+  Serial.println("Comando de resgate enviado.");
+  vTaskDelay(pdMS_TO_TICKS(2000));
+
   // xTaskCreatePinnedToCore(mqttCommandTask, "mqtt_cmd_task", 4096, NULL, 5, NULL, 1);
   xTaskCreatePinnedToCore(TaskConectarWiFi, "Conectar-WiFi", 4096, NULL, 5, NULL, 0);
   xTaskCreatePinnedToCore(TaskConectarMQTT, "Conectar-MQTT", 12288, NULL, 5, NULL, 0);
@@ -450,6 +454,16 @@ void setup()
 // ======= LOOP PRINCIPAL DO ARDUINO (LEITURA) ========
 void loop()
 {
+  // rfidReader.setParameters();
+  //  uint8_t novoEPC[] = {0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42};
+  uint8_t novoEPC[] = {0xE2, 0x80, 0x11, 0x91, 0xA5, 0x03, 0x00, 0x65, 0x3C, 0xF1, 0xCA, 0xA9};
+  // rfidReader.writeTagData(0x00000000, 0x01, 0x0002, 6, novoEPC);
+  //  delay(10);
+  uint8_t epcOriginal[] = {0xE2, 0x80, 0x11, 0x91, 0xA5, 0x03, 0x00, 0x65, 0x3C, 0xF1, 0xCA, 0xA9};
+
+  // Parâmetros: Senha (0), MemBank (1 = EPC), Offset (2 Words), Length (6 Words), Dados
+
+  // rfidReader.writeTagData(0x00000000, 0x01, 0x0002, 6, epcOriginal);
 
   static unsigned long ultimoPoll = 0;
   static uint8_t responseBuffer[256];

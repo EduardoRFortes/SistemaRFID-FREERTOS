@@ -3,7 +3,7 @@
 // Constructor para HardwareSerial
 // O '&' depois de HardwareSerial significa que estamos passando uma referência ao objeto.
 RFIDR200::RFIDR200(HardwareSerial &serial, uint32_t baudRate) : serial(serial), baudRate(baudRate) {}
-
+void printHexArray(const char *prefix, const uint8_t *data, size_t length);
 // O construtor de SoftwareSerial foi removido.
 
 void RFIDR200::begin()
@@ -262,7 +262,7 @@ void RFIDR200::readTagData(uint32_t accessPassword, uint8_t memBank, uint16_t ad
 
 void RFIDR200::writeTagData(uint32_t accessPassword, uint8_t memBank, uint16_t address, uint16_t length, uint8_t *data)
 {
-    uint8_t command[18 + length * 2] = {
+    uint8_t command[16 + (length * 2)] = {
         0xAA, 0x00, 0x49, 0x00, static_cast<uint8_t>(9 + length * 2),
         (uint8_t)(accessPassword >> 24), (uint8_t)(accessPassword >> 16),
         (uint8_t)(accessPassword >> 8), (uint8_t)(accessPassword & 0xFF),
@@ -275,6 +275,7 @@ void RFIDR200::writeTagData(uint32_t accessPassword, uint8_t memBank, uint16_t a
     }
     command[14 + length * 2] = calculateChecksum(command, 15 + length * 2);
     command[15 + length * 2] = 0xDD;
+    printHexArray("Gravando: ", command, sizeof(command));
     sendCommand(command, sizeof(command));
 }
 
@@ -431,6 +432,100 @@ void RFIDR200::getModuleInformation()
     }
 };
 
+void RFIDR200::setParameters()
+{
+    // uint8_t command[] = {
+    //     0xAA, 0x00, 0x0C, 0x00, 0x13,                                           // Header(0xAA), Type(0x00), Command(0x0C), PL(0x0013)
+    //     0x01,                                                                   // SelParam (MemBank EPC)[cite: 1]
+    //     0x00, 0x00, 0x00, 0x20,                                                 // Ptr (Inicia no bit 32)[cite: 1]
+    //     0x60,                                                                   // MaskLen (96 bits = 12 bytes da tag)[cite: 1]
+    //     0x00,                                                                   // Truncate (Desabilitado)[cite: 1]
+    //     0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, // Mask (Sua Tag exata)
+    //     0x00,                                                                   // Checksum (Calculado: 0xA0 + 0x5B1 = 0x651 -> LSB: 0x51)[cite: 1]
+    //     0xDD                                                                    // End(0xDD)[cite: 1]
+    // };
+
+    uint8_t command[] = {
+
+        0xAA, 0x00, 0x0C, 0x00, 0x13,
+        0x01, 0x00, 0x00, 0x00, 0x20, 0x60, 0x00,
+        0xE2, 0x80, 0x11, 0x91, 0xA5, 0x03, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42,
+        0xD8, 0xDD};
+
+    // command[24] = calculateChecksum(command, sizeof(command));
+    printHexArray("TAG C: ", command, sizeof(command));
+    sendCommand(command, sizeof(command));
+    delay(1000);
+    uint8_t buffer[10];
+    // getResponse(buffer, sizeof(buffer));
+
+    printHexArray("Resp: ", buffer, sizeof(command));
+    delay(1000);
+    // readTagUserMemory();
+    delay(1000);
+    uint8_t epcOriginal[] = {0xE2, 0x80, 0x11, 0x91, 0xA5, 0x03, 0x00, 0x65, 0x3C, 0xF1, 0xCA, 0xA9};
+}
+
+bool RFIDR200::
+    readTagUserMemory()
+{
+    // Definição do frame baseando-se nos parâmetros do comando 0x39 (Read label data storage area)[cite: 1]
+    // Access Password: 0x0000FFFF | MemBank: 0x03 (User area)[cite: 1]
+    // SA (Offset): 0x0000 | DL (Length): 0x0002 Words | Checksum: 0x45[cite: 1]
+    uint8_t command[] = {
+        0xAA, 0x00, 0x39, 0x00, 0x09, // Header, Type, Command, PL(MSB), PL(LSB)
+        0x00, 0x00, 0x00, 0x00,       // Access Password
+        0x02,                         // MemBank: User area
+        0x00, 0x00,                   // SA: Endereço inicial (0x0000)
+        0x00, 0x04,                   // DL: Quantidade a ser lida (2 Words = 4 Bytes)
+        0x00,                         // Checksum
+        0xDD                          // End
+    };
+
+    command[14] = calculateChecksum(command, sizeof(command));
+
+    // Limpa a UART e envia o pacote via rotina nativa[cite: 2, 5]
+    sendCommand(command, sizeof(command));
+
+    uint8_t responseBuffer[64];
+
+    // Aguarda o fechamento do frame com o byte 0xDD (timeout de 500ms)[cite: 5]
+    if (getResponse(responseBuffer, sizeof(responseBuffer), 500))
+    {
+        printHexArray("Response g: ", responseBuffer, sizeof(responseBuffer));
+
+        // Verifica se o módulo rejeitou o comando com um frame de erro (0xFF)[cite: 2]
+        if (responseBuffer[2] == 0xFF)
+        {
+            Serial.printf("Erro de leitura na tag. Codigo R200: %02X\n", responseBuffer[5]);
+            return false;
+        }
+
+        // Valida se a resposta corresponde ao comando de leitura 0x39
+        if (responseBuffer[2] == 0x39)
+        {
+
+            // Extrai o tamanho real do payload da resposta[cite: 5]
+            size_t payloadLength = (static_cast<size_t>(responseBuffer[3]) << 8) |
+                                   static_cast<size_t>(responseBuffer[4]);
+
+            Serial.print("Dados lidos do banco USER: ");
+
+            // O payload da resposta do R200 inicia no índice 5.
+            // Os dados da memória da tag são impressos em formato Hexadecimal.
+            for (size_t i = 0; i < payloadLength; i++)
+            {
+                Serial.printf("%02X ", responseBuffer[5 + i]);
+            }
+
+            Serial.println();
+            return true;
+        }
+    }
+
+    Serial.println("Timeout: Sem resposta ao comando 0x39.");
+    return false;
+}
 void RFIDR200::processMqttCommand(PubSubClient &mqttClient,
                                   const char *responseTopic,
                                   uint8_t *command,
@@ -527,3 +622,22 @@ int RFIDR200::checkErrorCode(uint8_t code)
     return 0;
 }
 // ... (O resto das suas funções como killTag, lockTag, etc. podem ficar aqui sem alterações)
+
+void printHexArray(const char *prefix, const uint8_t *data, size_t length)
+{
+    Serial.print(prefix);
+    for (size_t i = 0; i < length; i++)
+    {
+        if (data[i] < 0x10)
+        {
+            Serial.print('0');
+        }
+        Serial.print(data[i], HEX);
+        Serial.print(' ');
+        if (data[i] == 0xDD)
+        {
+            printf("FIM");
+        }
+    }
+    Serial.println(); // Quebra de linha ao final
+}

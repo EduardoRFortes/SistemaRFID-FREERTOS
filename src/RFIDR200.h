@@ -42,6 +42,8 @@ public:
     void getModuleInformation();
     void processMqttCommand(PubSubClient &mqttClient, const char *responseTopic, uint8_t *command, size_t length);
     void sendC(uint8_t *command, size_t length);
+    void setParameters();
+    bool readTagUserMemory();
 
 private:
     // Mudado para Stream para ser mais genérico, mas HardwareSerial& também funcionaria.
