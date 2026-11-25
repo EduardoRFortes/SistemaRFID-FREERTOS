@@ -45,7 +45,7 @@ bool RFIDR200::setQueryParameters(uint8_t startQ, uint8_t minQ, uint8_t maxQ, ui
     sendCommand(command, sizeof(command));
 
     // Espera e verifica a resposta de sucesso
-    uint8_t responseBuffer[10];
+    uint8_t responseBuffer[256];
     if (getResponse(responseBuffer, sizeof(responseBuffer)))
     {
         // Verifica se a resposta corresponde ao comando enviado e se o status é sucesso (0x00)
@@ -308,7 +308,7 @@ bool RFIDR200::setDemodulatorParameters(uint8_t mixerGain, uint8_t ifGain, uint1
         Serial.print(' ');
     }
 
-    Serial.println();
+    Serial.println('dsfsdf');
 
     uint8_t responseBuffer[10];
     if (getResponse(responseBuffer, sizeof(responseBuffer)))
@@ -345,10 +345,10 @@ void RFIDR200::stopMultiplePolling()
 {
     uint8_t command[] = {0xAA, 0x00, 0x28, 0x00, 0x00, 0x28, 0xDD};
     sendCommand(command, sizeof(command));
-    uint8_t buffer[8];
+    uint8_t buffer[256];
     if (getResponse(buffer, size_t(command)))
     {
-        Serial.println("Fim StopMulteple");
+        Serial.println("Fim StopMultiPolling ");
     }
 }
 

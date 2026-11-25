@@ -231,6 +231,7 @@ void TaskConectarMQTT(void *pvParameters)
     {
       vTaskDelay(pdMS_TO_TICKS(1000));
     }
+    vTaskDelay(pdMS_TO_TICKS(5000));
   }
 }
 
@@ -433,7 +434,7 @@ void setup()
 
   // rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
   // rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
-  rfidReader.setDemodulatorParameters(0x03, 0x06, 0x0150);
+  rfidReader.setDemodulatorParameters(0x03, 0x06, 0x01B0);
   rfidReader.setQueryParameters(1, 1, 1, 0);
   rfidReader.stopMultiplePolling();
 
@@ -454,6 +455,7 @@ void setup()
 // ======= LOOP PRINCIPAL DO ARDUINO (LEITURA) ========
 void loop()
 {
+  esp_task_wdt_reset();
   // rfidReader.setParameters();
   //  uint8_t novoEPC[] = {0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42};
   uint8_t novoEPC[] = {0xE2, 0x80, 0x11, 0x91, 0xA5, 0x03, 0x00, 0x65, 0x3C, 0xF1, 0xCA, 0xA9};
@@ -469,6 +471,8 @@ void loop()
   static uint8_t responseBuffer[256];
   static const uint32_t GET_RESPONSE_TIMEOUT_MS = 1000;
   static unsigned long tempoDesconectado = 0;
+  static unsigned long tempoCicloRF = 0;
+  static bool radioLigado = false;
 
   if (mqttClient.connected())
   {
@@ -489,15 +493,28 @@ void loop()
   }
 
   // if (false)
-  if (millis() - ultimoPoll >= T_INTERVALO_LEITURA_MS)
+  if (!radioLigado && (millis() - tempoCicloRF >= 100))
+  {
+    MySerial.flush();
+    rfidReader.initiateMultiplePolling(40000); // Inicia rajada de leituras
+    radioLigado = true;
+    tempoCicloRF = millis();
+    digitalWrite(led, HIGH);
+  }
+  else if (radioLigado && (millis() - tempoCicloRF >= 5000))
+  {
+    // Envia Stop Polling (0x28) para resfriar o módulo e limpar o barramento
+    uint8_t cmdStop[] = {0xAA, 0x00, 0x28, 0x00, 0x00, 0x28, 0xDD};
+    rfidReader.stopMultiplePolling();
+    radioLigado = false;
+    tempoCicloRF = millis();
+    digitalWrite(led, LOW);
+  }
+
+  while (MySerial.available() > 0)
   {
 
-    MySerial.flush();
-
-    rfidReader.initiateSinglePolling();
-    ultimoPoll = millis();
-
-    if (rfidReader.getResponse(responseBuffer, 256, GET_RESPONSE_TIMEOUT_MS))
+    if (rfidReader.getResponse(responseBuffer, 256, 20))
     {
 
       if (rfidReader.hasValidTag(responseBuffer))
@@ -517,7 +534,7 @@ void loop()
         {
 
           Serial.printf("TAG: %s | RSSI: %d\n", epc_hex_str, rssi);
-          digitalWrite(led, !digitalRead(led));
+
           // Deduplicação: descarta mesma tag vista há menos de 5s
           static char dedupEpc[8][25] = {};
           static unsigned long dedupMs[8] = {0};
@@ -532,7 +549,7 @@ void loop()
             if (dedupEpc[i][0] != '\0' && strcmp(dedupEpc[i], epc_hex_str) == 0)
             {
               matchSlot = i;
-              if (millis() - dedupMs[i] < 5000UL)
+              if (millis() - dedupMs[i] < 10000UL)
               {
                 shouldPublish = false;
               }
@@ -571,7 +588,7 @@ void loop()
     }
   }
 
-  vTaskDelay(pdMS_TO_TICKS(10));
+  vTaskDelay(pdMS_TO_TICKS(5));
 }
 
 // ======= FUNÇÃO PARA GRAVAR DADOS NO NVS (Executar apenas se necessário) ========
